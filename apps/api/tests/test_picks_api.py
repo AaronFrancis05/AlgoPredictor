@@ -64,6 +64,22 @@ async def test_free_plan_sees_three_picks_revealed_close_to_kickoff(client):
     assert "not certainties" in data["disclaimer"]
 
 
+async def test_signed_out_sees_no_picks_but_free_user_sees_free_allocation(client):
+    day = datetime.now(UTC).date() - timedelta(days=2)
+    picks = make_picks(day, 6, prefix="anon")
+    await publish(client, picks)  # finished matches, so the free picks are past their reveal time
+    results = [dict(prediction_id=p["prediction_id"], result="home", correct=True, rps=0.1) for p in picks]
+    raw, headers = signed({"results": results})
+    assert (await client.post("/internal/ingest/results", content=raw, headers=headers)).status_code == 200
+    anon = (await client.get("/api/v1/picks", params={"date": day.isoformat()})).json()
+    assert anon["hidden_count"] == 6 and all(p["locked"] and p["pick"] is None for p in anon["picks"])
+    await login(client, await register_verified(client))
+    free = (await client.get("/api/v1/picks", params={"date": day.isoformat()})).json()
+    shown = [p for p in free["picks"] if not p["locked"]]
+    assert free["plan"] == "free" and free["hidden_count"] == 3
+    assert sorted(p["confidence"] for p in shown) == sorted(p["confidence"] for p in picks)[-3:]
+
+
 async def test_pro_sees_all_picks_but_not_value_flags(client):
     day = datetime.now(UTC).date() + timedelta(days=3)
     await publish(client, make_picks(day, 6, prefix="pro"))
