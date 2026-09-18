@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Archivo, IBM_Plex_Mono } from "next/font/google";
 import { connection } from "next/server";
 
 import { Providers } from "@/components/providers";
@@ -7,12 +7,12 @@ import { site } from "@/lib/site";
 
 import "./globals.css";
 
-const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"], display: "swap" });
-const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"], display: "swap" });
+const sans = Archivo({ variable: "--font-archivo", subsets: ["latin"], display: "swap" });
+const mono = IBM_Plex_Mono({ variable: "--font-plex-mono", subsets: ["latin"], weight: ["400", "500", "600"], display: "swap" });
 
 export const metadata: Metadata = {
   metadataBase: new URL(site.url),
-  title: { default: `${site.name} — ${site.tagline}`, template: `%s · ${site.name}` },
+  title: { default: `${site.name} | ${site.tagline}`, template: `%s · ${site.name}` },
   description: site.description,
   applicationName: site.name,
   keywords: ["football predictions", "soccer predictions", "betting tips", "match probabilities",
@@ -38,7 +38,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   // pre-rendered static HTML, whose scripts would then be blocked. Public data is still cached via fetch tags.
   await connection();
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
+    <html lang="en" className={`${sans.variable} ${mono.variable} h-full antialiased`}>
       <body className="flex min-h-full flex-col">
         <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-surface focus:px-3 focus:py-2">
           Skip to content

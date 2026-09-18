@@ -4,15 +4,15 @@ import type { ComponentProps, ReactNode } from "react";
 import { cn } from "@/lib/format";
 
 const buttonVariants = {
-  primary: "bg-brand text-brand-fg hover:brightness-110",
-  secondary: "bg-surface-2 text-fg border border-border hover:border-muted",
+  primary: "bg-brand text-brand-fg hover:brightness-95",
+  secondary: "bg-transparent text-fg border border-border hover:bg-surface-2",
   ghost: "text-fg hover:bg-surface-2",
   danger: "bg-danger text-white hover:brightness-110",
 } as const;
 
 type Variant = keyof typeof buttonVariants;
 const base =
-  "inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition " +
+  "inline-flex items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-semibold transition-colors " +
   "disabled:cursor-not-allowed disabled:opacity-50";
 
 export function Button({ variant = "primary", className, ...props }: ComponentProps<"button"> & { variant?: Variant }) {
@@ -34,7 +34,7 @@ export function Card({ className, ...props }: ComponentProps<"div">) {
 export function Badge({ className, ...props }: ComponentProps<"span">) {
   return (
     <span
-      className={cn("inline-flex items-center rounded-full border border-border px-2.5 py-0.5 text-xs font-medium",
+      className={cn("inline-flex items-center rounded-sm border border-border px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide",
         className)}
       {...props}
     />
@@ -49,7 +49,7 @@ export function Input({ className, ...props }: ComponentProps<"input">) {
   return (
     <input
       className={cn(
-        "w-full rounded-xl border border-border bg-surface-2 px-3.5 py-2.5 text-sm text-fg placeholder:text-muted " +
+        "w-full rounded-md border border-border bg-surface-2 px-3.5 py-2.5 text-sm text-fg placeholder:text-muted " +
           "focus:border-accent focus:outline-none aria-invalid:border-danger",
         className,
       )}
@@ -96,7 +96,7 @@ export function Alert({ tone = "info", children }: { tone?: "info" | "error" | "
     warn: "border-warn/40 bg-warn/10",
   };
   return (
-    <div role={tone === "error" ? "alert" : "status"} className={cn("rounded-xl border px-4 py-3 text-sm", tones[tone])}>
+    <div role={tone === "error" ? "alert" : "status"} className={cn("rounded-md border px-4 py-3 text-sm", tones[tone])}>
       {children}
     </div>
   );

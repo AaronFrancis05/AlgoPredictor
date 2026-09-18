@@ -62,18 +62,18 @@ export function PricingTable({ plans }: { plans: Plan[] }) {
           id="currency"
           value={currency}
           onChange={(e) => setCurrency(e.target.value)}
-          className="rounded-xl border border-border bg-surface-2 px-3 py-2 text-sm"
+          className="rounded-md border border-border bg-surface-2 px-3 py-2 text-sm"
         >
           {currencies.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
-        <div role="radiogroup" aria-label="Billing interval" className="flex rounded-xl border border-border p-1">
+        <div role="radiogroup" aria-label="Billing interval" className="flex rounded-md border border-border p-1">
           {(["month", "year"] as const).map((i) => (
             <button
               key={i}
               role="radio"
               aria-checked={interval === i}
               onClick={() => setInterval(i)}
-              className={cn("rounded-lg px-3 py-1.5 text-sm", interval === i ? "bg-surface-2 font-semibold" : "text-muted")}
+              className={cn("rounded-sm px-3 py-1.5 text-sm", interval === i ? "bg-surface-2 font-semibold" : "text-muted")}
             >
               {i === "month" ? "Monthly" : "Yearly"}
             </button>
@@ -87,14 +87,14 @@ export function PricingTable({ plans }: { plans: Plan[] }) {
           const price = plan.prices.find((x) => x.currency === currency && x.interval === interval);
           const featured = plan.code === "pro";
           return (
-            <Card key={plan.code} className={cn("flex flex-col", featured && "border-brand shadow-lg shadow-brand/10")}>
+            <Card key={plan.code} className={cn("flex flex-col", featured && "border-brand")}>
               <div className="flex items-center justify-between">
                 <h2 className="text-lg font-bold">{plan.name}</h2>
                 {featured ? <Badge className="border-brand/50 text-brand">Most popular</Badge> : null}
               </div>
               <p className="mt-2 min-h-10 text-sm text-muted">{plan.description}</p>
               <p className="mt-6 text-3xl font-extrabold tabular-nums">
-                {plan.code === "free" ? "Free" : price ? formatPrice(price.amount_minor, price.currency) : "—"}
+                {plan.code === "free" ? "Free" : price ? formatPrice(price.amount_minor, price.currency) : "n/a"}
                 {plan.code !== "free" && price ? (
                   <span className="text-sm font-medium text-muted">/{interval === "month" ? "mo" : "yr"}</span>
                 ) : null}

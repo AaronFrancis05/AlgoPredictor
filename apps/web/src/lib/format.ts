@@ -17,11 +17,11 @@ export function formatPrice(amountMinor: number, currency: string, locale?: stri
 }
 
 export const pct = (v: number | null | undefined, digits = 1) =>
-  v == null ? "—" : `${(v * 100).toFixed(digits)}%`;
+  v == null ? "n/a" : `${(v * 100).toFixed(digits)}%`;
 
-export const odds = (v: number | null | undefined) => (v == null ? "—" : v.toFixed(2));
+export const odds = (v: number | null | undefined) => (v == null ? "n/a" : v.toFixed(2));
 
-export const prob = (v: number | null | undefined) => (v == null ? "—" : v.toFixed(3));
+export const prob = (v: number | null | undefined) => (v == null ? "n/a" : v.toFixed(3));
 
 /** Kick-off in the viewer's own time zone (stored in UTC). */
 export function kickoff(iso: string, locale?: string): string {

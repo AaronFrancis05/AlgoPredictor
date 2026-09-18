@@ -1,24 +1,67 @@
 """Account self-service: profile, API key (Elite), data export and deletion."""
-from fastapi import APIRouter, Depends, Request, Response
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import new_opaque_token, token_digest
+from app.core.config import get_settings
+from app.core.ratelimit import rate_limit
+from app.core.security import hash_password, new_opaque_token, token_digest, verify_password
 from app.db.session import get_db
 from app.deps import current_user
-from app.models import AuditLog, Payment, Slip, Subscription, User
-from app.schemas import ApiKeyOut, Message, UserOut
+from app.models import AuditLog, OAuthAccount, Payment, Slip, Subscription, User
+from app.routers.auth import google_authorize_url
+from app.schemas import ApiKeyOut, GoogleLinkOut, Message, PasswordSetIn, UserOut
 from app.services import auth_service as auth
 from app.services.audit import audit
 from app.services.entitlements import require_entitlement
 from app.services.users import user_out
 
 router = APIRouter(prefix="/me", tags=["account"])
+settings = get_settings()
+auth_limit = rate_limit("auth", settings.rate_limit_auth, fail_closed=True)
 
 
 @router.get("", response_model=UserOut)
 async def me(user: User = Depends(current_user), db: AsyncSession = Depends(get_db)) -> UserOut:
     return await user_out(db, user)
+
+
+# ------------------------------------------------------------------ sign-in methods (password and Google)
+@router.post("/password", response_model=Message, dependencies=[Depends(auth_limit)])
+async def set_password(body: PasswordSetIn, request: Request, response: Response, user: User = Depends(current_user),
+                       db: AsyncSession = Depends(get_db)) -> Message:
+    """Add a password to a Google-only account, or change it (needs the current one).
+    Every other session is signed out; this browser gets a fresh session."""
+    had_password = user.password_hash is not None
+    if had_password and not (body.current_password and verify_password(user.password_hash, body.current_password)):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Current password is incorrect")
+    user.password_hash = hash_password(body.password)
+    user.failed_logins, user.locked_until = 0, None
+    await auth.revoke_all_sessions(db, user.id)
+    await audit(db, "password_changed" if had_password else "password_added", request, user.id)
+    await auth.issue_session(db, request, response, user)
+    return Message(message="Password changed." if had_password else
+                   "Password added. You can now sign in with your email and password as well as Google.")
+
+
+@router.post("/google/link", response_model=GoogleLinkOut, dependencies=[Depends(auth_limit)])
+async def link_google(user: User = Depends(current_user)) -> GoogleLinkOut:
+    """Start connecting a Google account. The browser then navigates to the returned URL."""
+    if not settings.google_client_id:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Google sign-in is not available yet")
+    return GoogleLinkOut(url=await google_authorize_url(link_user_id=user.id))
+
+
+@router.delete("/google", response_model=Message)
+async def unlink_google(request: Request, user: User = Depends(current_user),
+                        db: AsyncSession = Depends(get_db)) -> Message:
+    if user.password_hash is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Add a password first, so you can still sign in after Google is disconnected")
+    await db.execute(delete(OAuthAccount).where(OAuthAccount.user_id == user.id, OAuthAccount.provider == "google"))
+    await audit(db, "google_unlinked", request, user.id)
+    await db.commit()
+    return Message(message="Google disconnected. Sign in with your email and password from now on.")
 
 
 @router.post("/api-key", response_model=ApiKeyOut, dependencies=[Depends(require_entitlement("api_access"))])

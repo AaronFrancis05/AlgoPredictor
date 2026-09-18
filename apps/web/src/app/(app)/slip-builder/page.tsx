@@ -78,7 +78,7 @@ export default function SlipBuilder() {
                   <div><p className="text-xs text-muted">Target</p><p className="text-2xl font-bold tabular-nums">{odds(slip.target_odds)}</p></div>
                   <div><p className="text-xs text-muted">Combined odds</p><p className="text-2xl font-bold tabular-nums">{odds(slip.combined_odds)}</p></div>
                   <div><p className="text-xs text-muted">Model win probability</p><p className="text-2xl font-bold tabular-nums">{pct(slip.combined_probability)}</p></div>
-                  <div><p className="text-xs text-muted">Expected value</p><p className="text-2xl font-bold tabular-nums">{slip.expected_value != null ? `${(slip.expected_value * 100).toFixed(1)}%` : "—"}</p></div>
+                  <div><p className="text-xs text-muted">Expected value</p><p className="text-2xl font-bold tabular-nums">{slip.expected_value != null ? `${(slip.expected_value * 100).toFixed(1)}%` : "n/a"}</p></div>
                 </Card>
                 <Alert>{slip.message}</Alert>
                 {slip.remaining_today != null ? <p className="text-xs text-muted">{slip.remaining_today} slip(s) left today.</p> : null}

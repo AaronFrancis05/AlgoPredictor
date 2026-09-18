@@ -2,13 +2,15 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { z } from "zod";
 
 import { Alert, Button, ButtonLink, Card, Input, PageHeader } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useMe } from "@/lib/hooks";
 import { Message } from "@/lib/schemas";
+
+import { SignInMethods } from "./sign-in-methods";
 
 const ApiKey = z.object({ api_key: z.string(), note: z.string() });
 
@@ -59,6 +61,10 @@ export default function Account() {
         </div>
       </Card>
 
+      <Suspense>
+        <SignInMethods user={user} />
+      </Suspense>
+
       <Card className="space-y-3">
         <h2 className="font-semibold">API access</h2>
         {user.entitlements.api_access ? (
@@ -67,7 +73,7 @@ export default function Account() {
             {key ? (
               <div className="space-y-2">
                 <Input readOnly value={key} aria-label="Your new API key" onFocus={(e) => e.currentTarget.select()} />
-                <p className="text-xs text-warn">Copy it now — it will not be shown again.</p>
+                <p className="text-xs text-warn">Copy it now. It will not be shown again.</p>
               </div>
             ) : null}
             <div className="flex gap-2">

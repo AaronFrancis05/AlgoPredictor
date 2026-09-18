@@ -115,6 +115,8 @@ export const User = z.object({
   plan: z.string(),
   entitlements: Entitlements,
   has_api_key: z.boolean(),
+  has_password: z.boolean(),
+  google_linked: z.boolean(),
 });
 export type User = z.infer<typeof User>;
 
@@ -157,6 +159,11 @@ export const ResetForm = z
   .object({ password, confirm: z.string() })
   .refine((v) => v.password === v.confirm, { message: "Passwords do not match", path: ["confirm"] });
 
+export const PasswordSetForm = z
+  .object({ current_password: z.string().optional(), password, confirm: z.string() })
+  .refine((v) => v.password === v.confirm, { message: "Passwords do not match", path: ["confirm"] });
+export type PasswordSetForm = z.infer<typeof PasswordSetForm>;
+
 export const SlipForm = z
   .object({
     target_odds: z.coerce.number().min(1.5, "Minimum 1.5").max(200, "Maximum 200"),
@@ -165,6 +172,6 @@ export const SlipForm = z
     days_ahead: z.coerce.number().int().min(0).max(14),
     prefer_value: z.boolean().default(false),
   })
-  .refine((v) => v.max_legs >= v.min_legs, { message: "Max legs must be ≥ min legs", path: ["max_legs"] });
+  .refine((v) => v.max_legs >= v.min_legs, { message: "Max legs must be at least min legs", path: ["max_legs"] });
 export type SlipFormInput = z.input<typeof SlipForm>;
 export type SlipFormOutput = z.output<typeof SlipForm>;

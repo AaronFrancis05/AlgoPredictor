@@ -29,7 +29,7 @@ export default async function TrackRecordPage() {
     <Container className="space-y-10 py-16">
       <PageHeader
         title="Track record"
-        subtitle="Every published prediction is graded against the real result and stays on record — including the misses."
+        subtitle="Every published prediction is graded against the real result and stays on record, including the misses."
       />
 
       <section aria-labelledby="live" className="space-y-4">
@@ -44,10 +44,10 @@ export default async function TrackRecordPage() {
             <div className="grid gap-4 sm:grid-cols-3">
               <Card><p className="text-xs text-muted">Graded picks</p><p className="text-3xl font-bold tabular-nums">{tr.graded}</p></Card>
               <Card><p className="text-xs text-muted">Hit rate</p><p className="text-3xl font-bold tabular-nums">{pct(tr.hit_rate)}</p></Card>
-              <Card><p className="text-xs text-muted">Mean RPS (lower is better)</p><p className="text-3xl font-bold tabular-nums">{tr.mean_rps?.toFixed(4) ?? "—"}</p></Card>
+              <Card><p className="text-xs text-muted">Mean RPS (lower is better)</p><p className="text-3xl font-bold tabular-nums">{tr.mean_rps?.toFixed(4) ?? "n/a"}</p></Card>
             </div>
             {tr.graded < 200 ? (
-              <p className="text-xs text-muted">Fewer than 200 graded picks — treat these live figures as early and noisy.</p>
+              <p className="text-xs text-muted">Fewer than 200 graded picks, so treat these live figures as early and noisy.</p>
             ) : null}
             <div className="overflow-x-auto">
               <table className="w-full min-w-[480px] text-left text-sm">
@@ -78,7 +78,7 @@ export default async function TrackRecordPage() {
           <p>
             Before going live, the model was evaluated walk-forward: trained only on seasons before each test season,
             then scored on {bt.source}. Its ranked probability score was <strong>{bt.model_rps.toFixed(5)}</strong> against
-            <strong> {bt.bookmaker_rps.toFixed(5)}</strong> for bookmaker odds on the same matches — a small edge, not a
+            <strong> {bt.bookmaker_rps.toFixed(5)}</strong> for bookmaker odds on the same matches. A small edge, not a
             magic one.
           </p>
           <div className="grid grid-cols-3 gap-4">

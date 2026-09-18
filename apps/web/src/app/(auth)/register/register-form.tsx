@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import type { z } from "zod";
 
+import { GoogleButton, OrDivider } from "@/components/google-button";
 import { Alert, Button, Field, Input } from "@/components/ui";
 import { api } from "@/lib/api";
 import { Message, RegisterForm as RegisterSchema } from "@/lib/schemas";
@@ -38,7 +39,7 @@ export function RegisterForm() {
         <h1 className="text-2xl font-bold">Check your inbox</h1>
         <Alert tone="success">{done}</Alert>
         <p className="text-sm text-muted">Click the link in the email to confirm your address, then sign in.</p>
-        <Link className="text-sm text-accent underline" href="/login">Go to sign in</Link>
+        <Link className="text-sm text-fg underline underline-offset-4" href="/login">Go to sign in</Link>
       </div>
     );
   }
@@ -48,10 +49,18 @@ export function RegisterForm() {
       <div>
         <h1 className="text-2xl font-bold">Create your free account</h1>
         <p className="mt-1 text-sm text-muted">
-          Already registered? <Link className="text-accent underline" href="/login">Sign in</Link>
+          Already registered? <Link className="text-fg underline underline-offset-4" href="/login">Sign in</Link>
         </p>
       </div>
       {error ? <Alert tone="error">{error}</Alert> : null}
+      <div className="space-y-2">
+        <GoogleButton label="Sign up with Google" />
+        <p className="text-xs text-muted">
+          By continuing with Google you accept the <Link className="underline" href="/legal/terms">terms</Link> and{" "}
+          <Link className="underline" href="/legal/privacy">privacy policy</Link>. You confirm your age on the next step.
+        </p>
+      </div>
+      <OrDivider label="or sign up with email" />
       <form onSubmit={onSubmit} noValidate className="space-y-4">
         <Field label="Name (optional)" htmlFor="full_name" error={e.full_name?.message}>
           <Input id="full_name" autoComplete="name" {...register("full_name")} />
