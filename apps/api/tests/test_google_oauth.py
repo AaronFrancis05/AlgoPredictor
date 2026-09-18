@@ -173,3 +173,13 @@ def test_verify_google_id_token_tolerates_clock_skew(monkeypatch):
     token = jwt.encode({"iss": "https://accounts.google.com", "aud": "test-client-id", "sub": "s", "nonce": "n",
                         "iat": now + 5, "exp": now + 3600}, key, algorithm="RS256")
     assert auth_router._verify_google_id_token(token, "n")["sub"] == "s"
+
+
+def test_cryptography_is_a_declared_dependency():
+    # The local venv can have cryptography via other packages; the Docker image installs only pyproject deps,
+    # and without cryptography PyJWT cannot verify Google's RS256 ID tokens.
+    import tomllib
+    from pathlib import Path
+
+    deps = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())["project"]["dependencies"]
+    assert any(d.startswith("cryptography") for d in deps)
