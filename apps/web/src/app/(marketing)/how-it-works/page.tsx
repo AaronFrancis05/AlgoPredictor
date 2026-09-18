@@ -5,7 +5,7 @@ import { ButtonLink, Container, PageHeader } from "@/components/ui";
 
 export const metadata: Metadata = {
   title: "How it works",
-  description: "How AlgoPredict works: a probability for every fixture, confidence tiers, a public track record, the target-odds slip builder and the weekly jackpot.",
+  description: "Open AlgoPredict, see which matches are worth backing today, and turn the strongest picks into a slip at the odds you want. Here is what you get each day.",
   alternates: { canonical: "/how-it-works" },
 };
 

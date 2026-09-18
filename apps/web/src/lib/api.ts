@@ -54,6 +54,12 @@ function messageFrom(detail: unknown, status: number): string {
       admin_full_access: "Admin accounts already have every feature. There is nothing to pay.",
       plan_already_covered:
         "Your current plan already includes everything this code gives, so it was not used. Keep it for later or pass it on.",
+      mfa_invalid: "That code is not right. Codes change every 30 seconds; check your phone's clock and try again.",
+      mfa_expired: "Sign-in timed out. Enter your password again.",
+      mfa_locked: "Too many wrong codes. Try again in 15 minutes.",
+      mfa_required: "Admin pages need two-factor sign-in. Turn it on under Account, Sign-in methods.",
+      mfa_reauth: "Admin pages need a session started with your authenticator code. Sign out and sign in again.",
+      mfa_already_enabled: "Two-factor sign-in is already on.",
     };
     return known[code] ?? code;
   }

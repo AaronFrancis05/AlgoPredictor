@@ -140,9 +140,7 @@ async def set_role(db: AsyncSession, email: str, role: str) -> User:
 
 async def after_change() -> None:
     """Plans derived from tokens or roles changed: drop cached plans (and viewers, which carry the role) so it
-    shows at once."""
+    shows at once. Raises if the viewer cache cannot be invalidated, so a role change is not reported as done
+    while other instances may still serve the old role (local copies are dropped regardless)."""
     await forget_user_plans()
-    try:
-        await invalidate("viewer")
-    except Exception as e:  # the viewer TTL still bounds staleness
-        log.warning("viewer_invalidate_failed", error=str(e))
+    await invalidate("viewer")

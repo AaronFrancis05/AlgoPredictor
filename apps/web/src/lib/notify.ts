@@ -13,17 +13,21 @@ const WATCHED = new Set(["live", "picks", "top"]);
  */
 const PREF_KEY = "ap.notify";
 const prefListeners = new Set<() => void>();
+let memoryPref = false; // mirror of the stored setting, used when localStorage is unavailable
 
 function readPref(): boolean {
+  const granted = typeof Notification !== "undefined" && Notification.permission === "granted";
+  let stored = memoryPref;
   try {
-    return localStorage.getItem(PREF_KEY) === "on" && typeof Notification !== "undefined"
-      && Notification.permission === "granted";
+    stored = localStorage.getItem(PREF_KEY) === "on";
   } catch {
-    return false;
+    // storage unavailable: keep the in-memory value
   }
+  return stored && granted;
 }
 
 function writePref(on: boolean) {
+  memoryPref = on;
   try {
     if (on) localStorage.setItem(PREF_KEY, "on");
     else localStorage.removeItem(PREF_KEY);
@@ -68,7 +72,12 @@ export function changeMessage(before: string | undefined, p: Pick): string | nul
   if (p.live && ["FT", "AET", "PEN"].includes(p.live.status) && !before.includes(`|${p.live.status}|`)) {
     return `Full time: ${teams}`;
   }
-  if (score !== scoreBefore && p.live?.home_goals != null) return `Goal: ${teams}`;
+  const goals = (s: string) => {
+    const [h, a] = s.split(":").map(Number);
+    return Number.isFinite(h) && Number.isFinite(a) ? h + a : null;
+  };
+  const [totalBefore, total] = [goals(scoreBefore), goals(score)];
+  if (totalBefore !== null && total !== null && total > totalBefore) return `Goal: ${teams}`;
   return null;
 }
 

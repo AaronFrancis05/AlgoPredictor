@@ -38,15 +38,24 @@ class Broker:
     def __init__(self) -> None:
         self._queues: set[asyncio.Queue[str]] = set()
         self._task: asyncio.Task | None = None
+        self.subscribed = asyncio.Event()  # set while the Redis subscription is active
 
     @property
     def connections(self) -> int:
         return len(self._queues)
 
+    def try_open(self, limit: int) -> "asyncio.Queue[str] | None":
+        """Reserve a stream slot, or None when `limit` are already open. Check and reservation have no await
+        between them, so concurrent requests cannot both pass the limit."""
+        if len(self._queues) >= limit:
+            return None
+        return self.open()
+
     def open(self) -> "asyncio.Queue[str]":
         q: asyncio.Queue[str] = asyncio.Queue(maxsize=QUEUE_SIZE)
         self._queues.add(q)
         if self._task is None or self._task.done():
+            self.subscribed = asyncio.Event()  # fresh per subscription task, bound to the running loop
             self._task = asyncio.create_task(self._run())
         return q
 
@@ -67,6 +76,7 @@ class Broker:
             pubsub = get_redis().pubsub(ignore_subscribe_messages=True)
             try:
                 await pubsub.subscribe(CHANNEL)
+                self.subscribed.set()
                 delay = 1.0
                 while self._queues:
                     msg = await pubsub.get_message(timeout=1.0)
@@ -75,10 +85,12 @@ class Broker:
             except asyncio.CancelledError:
                 raise
             except Exception as e:  # dropped connection: resubscribe with backoff
+                self.subscribed.clear()
                 log.warning("event_subscription_failed", error=str(e))
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 30.0)
             finally:
+                self.subscribed.clear()
                 with contextlib.suppress(Exception):
                     await pubsub.aclose()
 

@@ -198,10 +198,28 @@ export const User = z.object({
   // optional so the site keeps working against an API deployed before these fields existed
   created_at: z.string().nullable().optional(),
   account_retention_days: z.number().optional(),
+  mfa_enabled: z.boolean().optional().default(false),
+  mfa_session: z.boolean().optional().default(false), // this session was started with the authenticator code
 });
 export type User = z.infer<typeof User>;
 
 export const AuthResult = z.object({ user: User, csrf_token: z.string(), access_token_expires_in: z.number() });
+/** Password (or Google) accepted but two-factor is on: POST /auth/mfa/verify finishes signing in. */
+export const MfaChallenge = z.object({ mfa_required: z.literal(true) });
+export const LoginResult = z.union([AuthResult, MfaChallenge]);
+export type LoginResult = z.infer<typeof LoginResult>;
+export const MfaSetup = z.object({ secret: z.string(), otpauth_uri: z.string(), note: z.string() });
+export type MfaSetup = z.infer<typeof MfaSetup>;
+export const RecoveryCodes = z.object({ recovery_codes: z.array(z.string()), note: z.string() });
+
+export const MfaCodeForm = z.object({
+  code: z
+    .string()
+    .trim()
+    .refine((v) => /^\d{6}$/.test(v.replace(/\s/g, "")) || /^[A-Za-z0-9]{5}-?[A-Za-z0-9]{5}$/.test(v),
+            "Enter the 6-digit code, or a recovery code like ABCDE-12345"),
+});
+export type MfaCodeForm = z.infer<typeof MfaCodeForm>;
 export const Message = z.object({ message: z.string() });
 export const Redirect = z.object({ url: z.string().url() });
 export const Subscription = z.object({

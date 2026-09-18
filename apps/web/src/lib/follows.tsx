@@ -40,6 +40,8 @@ export function FollowsProvider({ enabled, children }: { enabled: boolean; child
     },
     onError: (_e, _v, ctx) => qc.setQueryData(KEY, ctx?.before),
     onSuccess: (data) => qc.setQueryData(KEY, data),
+    // overlapping toggles can settle out of order: refetch so the cache ends on the server's list
+    onSettled: () => qc.invalidateQueries({ queryKey: KEY }),
   });
 
   const data = q.data;

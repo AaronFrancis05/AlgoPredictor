@@ -16,7 +16,7 @@ log = get_logger("http")
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 CSRF_EXEMPT_PREFIXES = ("/webhooks/", "/internal/", "/api/v1/auth/login", "/api/v1/auth/register",
                         "/api/v1/auth/refresh", "/api/v1/auth/password", "/api/v1/auth/verify-email",
-                        "/api/v1/auth/google")
+                        "/api/v1/auth/google", "/api/v1/auth/mfa")  # all pre-authentication
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
@@ -103,7 +103,8 @@ class ETagMiddleware:
             tag = f'W/"{hashlib.sha256(body).hexdigest()[:32]}"'
             headers = [(k, v) for k, v in start["headers"] if k != b"content-length"]
             headers.append((b"etag", tag.encode()))
-            if wanted and tag in (t.strip() for t in wanted.split(",")):
+            candidates = {t.strip() for t in wanted.split(",")} if wanted else set()
+            if "*" in candidates or tag in candidates:
                 await send({"type": "http.response.start", "status": 304, "headers": [
                     (k, v) for k, v in headers if k in (b"etag", b"cache-control", b"vary", b"x-request-id")]})
                 await send({"type": "http.response.body", "body": b""})

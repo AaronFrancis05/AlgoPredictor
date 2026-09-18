@@ -69,7 +69,13 @@ export const TZ_COOKIE = "ap_tz";
 /** Today in an IANA time zone (server side, from the viewer's ap_tz cookie); UTC if the zone is unknown. */
 export function todayIn(timeZone: string | undefined, now = new Date()): string {
   try {
-    if (timeZone) return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+    if (timeZone) {
+      const parts = new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" })
+        .formatToParts(now);
+      const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value;
+      const [y, m, d] = [part("year"), part("month"), part("day")];
+      if (y && m && d) return `${y.padStart(4, "0")}-${m}-${d}`;
+    }
   } catch {
     // invalid zone: fall through
   }

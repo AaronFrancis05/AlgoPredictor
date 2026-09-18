@@ -13,8 +13,14 @@ const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
  * the viewer's date (time zone from the ap_tz cookie), the same day the browser will ask for. */
 export default async function DashboardPage({ searchParams }: PageProps<"/dashboard">) {
   const raw = (await searchParams).date;
-  const tz = (await cookies()).get(TZ_COOKIE)?.value;
-  const day = typeof raw === "string" && DAY_RE.test(raw) ? raw : todayIn(tz ? decodeURIComponent(tz) : undefined);
+  const rawTz = (await cookies()).get(TZ_COOKIE)?.value;
+  let tz: string | undefined;
+  try {
+    tz = rawTz ? decodeURIComponent(rawTz) : undefined;
+  } catch {
+    tz = undefined; // malformed cookie: default zone
+  }
+  const day = typeof raw === "string" && DAY_RE.test(raw) ? raw : todayIn(tz);
   return (
     <Prefetched queries={[{ key: picksKey(day), path: `/picks?date=${day}`, schema: PicksDay }]}>
       <Dashboard />

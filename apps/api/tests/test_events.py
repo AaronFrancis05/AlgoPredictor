@@ -27,7 +27,8 @@ async def test_published_change_reaches_open_streams_and_subscription_stops_when
     gen = stream(req, heartbeat=0.2, max_seconds=10)
     first = await gen.__anext__()
     assert first.startswith("retry: ") and events.broker.connections == 1
-    await asyncio.sleep(0.3)  # let the subscription start
+    async with asyncio.timeout(5):
+        await events.broker.subscribed.wait()
     await events.publish("live")
     assert await _next_event(gen) == "event: live\ndata: {}\n\n"
     await events.publish("picks")

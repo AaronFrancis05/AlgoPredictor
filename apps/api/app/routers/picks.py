@@ -130,11 +130,11 @@ async def history(response: Response, date_from: date | None = None, date_to: da
     done = [(r, s) for r in rows if (s := ps.status_of(r, states, now))[0] in HISTORY_PHASES]
     leagues = sorted({r["league_code"] for r, _ in done})
     done = [(r, s) for r, s in done if (not league or r["league_code"] == league) and (not tier or r["tier"] == tier)]
-    summary, by_tier = _summary(done)
     if outcome == "pending":
         done = [(r, s) for r, s in done if s[2] is None and s[0] not in VOID_PHASES]
     elif outcome:
         done = [(r, s) for r, s in done if s[2] == outcome]
+    summary, by_tier = _summary(done)  # same rows as total and picks
     done.sort(key=lambda x: (x[0]["kickoff_at"], x[0]["home_team"]), reverse=True)
     page_rows = [r for r, _ in done[(page - 1) * page_size: page * page_size]]
     items = await ps.with_status(db, [ps.serialise(r, plan) for r in page_rows], now)

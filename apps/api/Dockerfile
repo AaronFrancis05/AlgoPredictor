@@ -17,6 +17,7 @@ WORKDIR /app
 COPY --from=build /venv /venv
 COPY alembic.ini ./
 COPY migrations ./migrations
+COPY certs ./certs
 COPY app ./app
 USER app
 EXPOSE 8000

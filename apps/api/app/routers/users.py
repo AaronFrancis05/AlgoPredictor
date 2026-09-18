@@ -1,11 +1,13 @@
-"""Account self-service: profile, follows, API key (Elite), data export and deletion."""
+"""Account self-service: profile, sign-in methods, two-factor, follows, API key (Elite), data export and deletion."""
 import re
+from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import totp
 from app.core.config import get_settings
 from app.core.ratelimit import rate_limit
 from app.core.security import hash_password, new_opaque_token, token_digest, verify_password
@@ -13,7 +15,19 @@ from app.db.session import get_db
 from app.deps import current_user, forget_viewer, verified_adult
 from app.models import AuditLog, OAuthAccount, Payment, Slip, Subscription, User, UserFollow
 from app.routers.auth import google_authorize_url
-from app.schemas import ApiKeyOut, FollowsOut, GoogleLinkOut, Message, PasswordSetIn, RedeemIn, UserOut
+from app.schemas import (
+    ApiKeyOut,
+    FollowsOut,
+    GoogleLinkOut,
+    Message,
+    MfaCodeIn,
+    MfaEnableIn,
+    MfaRecoveryCodesOut,
+    MfaSetupOut,
+    PasswordSetIn,
+    RedeemIn,
+    UserOut,
+)
 from app.services import access_tokens
 from app.services import auth_service as auth
 from app.services.audit import audit
@@ -26,8 +40,8 @@ auth_limit = rate_limit("auth", settings.rate_limit_auth, fail_closed=True)
 
 
 @router.get("", response_model=UserOut)
-async def me(user: User = Depends(current_user), db: AsyncSession = Depends(get_db)) -> UserOut:
-    return await user_out(db, user)
+async def me(request: Request, user: User = Depends(current_user), db: AsyncSession = Depends(get_db)) -> UserOut:
+    return await user_out(db, user, mfa_session=request.state.mfa)
 
 
 # ------------------------------------------------------------------ sign-in methods (password and Google)
@@ -43,17 +57,83 @@ async def set_password(body: PasswordSetIn, request: Request, response: Response
     user.failed_logins, user.locked_until = 0, None
     await auth.revoke_all_sessions(db, user.id)
     await audit(db, "password_changed" if had_password else "password_added", request, user.id)
-    await auth.issue_session(db, request, response, user)
+    await auth.issue_session(db, request, response, user, mfa=request.state.mfa)
     return Message(message="Password changed." if had_password else
                    "Password added. You can now sign in with your email and password as well as Google.")
 
 
 @router.post("/google/link", response_model=GoogleLinkOut, dependencies=[Depends(auth_limit)])
-async def link_google(user: User = Depends(current_user)) -> GoogleLinkOut:
-    """Start connecting a Google account. The browser then navigates to the returned URL."""
+async def link_google(response: Response, user: User = Depends(current_user)) -> GoogleLinkOut:
+    """Start connecting a Google account. The browser then navigates to the returned URL; the flow only completes
+    in this browser (it gets the binding cookie), so the URL is useless to anyone it is sent to."""
     if not settings.google_client_id:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Google sign-in is not available yet")
-    return GoogleLinkOut(url=await google_authorize_url(link_user_id=user.id))
+    return GoogleLinkOut(url=await google_authorize_url(response, link_user_id=user.id))
+
+
+# ------------------------------------------------------------------ two-factor sign-in (TOTP)
+@router.post("/mfa/setup", response_model=MfaSetupOut, dependencies=[Depends(auth_limit)])
+async def mfa_setup(request: Request, user: User = Depends(current_user),
+                    db: AsyncSession = Depends(get_db)) -> MfaSetupOut:
+    """Create a new (pending) authenticator secret. Nothing changes for sign-in until /me/mfa/enable confirms it."""
+    if user.mfa_enabled:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail={"code": "mfa_already_enabled"})
+    secret = totp.new_secret()
+    user.totp_secret_enc = totp.encrypt_secret(secret)
+    await audit(db, "mfa_setup_started", request, user.id)
+    await db.commit()
+    return MfaSetupOut(secret=secret, otpauth_uri=totp.provisioning_uri(secret, user.email, settings.app_name))
+
+
+@router.post("/mfa/enable", response_model=MfaRecoveryCodesOut, dependencies=[Depends(auth_limit)])
+async def mfa_enable(body: MfaEnableIn, request: Request, response: Response, user: User = Depends(current_user),
+                     db: AsyncSession = Depends(get_db)) -> MfaRecoveryCodesOut:
+    """Turn two-factor on with the first code from the app. Needs the current password when the account has one,
+    so a stolen session cannot lock the owner out with the thief's phone. Other sessions are signed out."""
+    if user.mfa_enabled:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail={"code": "mfa_already_enabled"})
+    if not user.totp_secret_enc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Start the setup first")
+    if user.password_hash is not None and not (
+            body.current_password and verify_password(user.password_hash, body.current_password)):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Current password is incorrect")
+    step = totp.verify(totp.decrypt_secret(user.totp_secret_enc), body.code, None)
+    if step is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail={"code": "mfa_invalid"})
+    codes, digests = totp.new_recovery_codes()
+    user.totp_enabled_at, user.totp_last_step, user.mfa_recovery_digests = datetime.now(UTC), step, digests
+    await auth.revoke_all_sessions(db, user.id)
+    await audit(db, "mfa_enabled", request, user.id)
+    await auth.issue_session(db, request, response, user, mfa=True)  # this browser just proved the code
+    return MfaRecoveryCodesOut(recovery_codes=codes)
+
+
+@router.post("/mfa/recovery-codes", response_model=MfaRecoveryCodesOut, dependencies=[Depends(auth_limit)])
+async def mfa_new_recovery_codes(body: MfaCodeIn, request: Request, user: User = Depends(current_user),
+                                 db: AsyncSession = Depends(get_db)) -> MfaRecoveryCodesOut:
+    """Replace every recovery code (the old ones stop working). Needs a current code from the app."""
+    if auth.check_second_factor(user, body.code) != "totp":
+        await db.rollback()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail={"code": "mfa_invalid"})
+    codes, user.mfa_recovery_digests = totp.new_recovery_codes()
+    await audit(db, "mfa_recovery_codes_replaced", request, user.id)
+    await db.commit()
+    return MfaRecoveryCodesOut(recovery_codes=codes)
+
+
+@router.post("/mfa/disable", response_model=Message, dependencies=[Depends(auth_limit)])
+async def mfa_disable(body: MfaCodeIn, request: Request, response: Response, user: User = Depends(current_user),
+                      db: AsyncSession = Depends(get_db)) -> Message:
+    """Turn two-factor off with a current code or a recovery code. Other sessions are signed out."""
+    if not user.mfa_enabled or auth.check_second_factor(user, body.code) is None:
+        await db.rollback()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail={"code": "mfa_invalid"})
+    user.totp_secret_enc = user.totp_enabled_at = user.totp_last_step = user.mfa_recovery_digests = None
+    await auth.revoke_all_sessions(db, user.id)
+    await audit(db, "mfa_disabled", request, user.id)
+    await auth.issue_session(db, request, response, user, mfa=False)
+    note = " Admin pages need it, so they stay closed until you turn it back on." if user.is_admin else ""
+    return Message(message="Two-factor sign-in is off." + note)
 
 
 @router.delete("/google", response_model=Message)
@@ -123,14 +203,17 @@ async def follow(kind: Literal["match", "league"], target: str, user: User = Dep
     """Follow a match (its prediction_id) or a league (its code). Idempotent."""
     if not FOLLOW_TARGET.match(target):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid follow target")
-    exists = await db.get(UserFollow, (user.id, kind, target))
+    # lock the user's row until commit: concurrent follows by one user then check and insert one at a time,
+    # so they cannot both pass the limit (Postgres; SQLite ignores FOR UPDATE and serialises writes anyway)
+    await db.execute(select(User.id).where(User.id == user.id).with_for_update())
+    exists = await db.get(UserFollow, (user.id, kind, target), populate_existing=True)
     if exists is None:
         count = (await db.execute(select(func.count()).select_from(UserFollow)
                                   .where(UserFollow.user_id == user.id))).scalar_one()
         if count >= MAX_FOLLOWS:
             raise HTTPException(status.HTTP_409_CONFLICT, detail={"code": "follow_limit", "limit": MAX_FOLLOWS})
         db.add(UserFollow(user_id=user.id, kind=kind, target=target))
-        await db.commit()
+    await db.commit()  # also releases the row lock when nothing was added
     return await _follows(db, user.id)
 
 

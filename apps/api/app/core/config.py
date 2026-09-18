@@ -23,8 +23,14 @@ class Settings(BaseSettings):
     proxy_shared_secret: SecretStr = SecretStr("")
 
     database_url: str = "postgresql+asyncpg://algopredict:algopredict@localhost:5432/algopredict"
+    # Owner connection for `alembic upgrade` only (DDL). The API and worker use DATABASE_URL, which in production
+    # should be the restricted algopredict_app role (migration b3e7d1a5c9f2). Empty = migrations use DATABASE_URL.
+    migration_database_url: SecretStr = SecretStr("")
     # Supabase: postgresql+asyncpg://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres
+    # production must use verify-full (checked below): `require` encrypts but accepts any server certificate
     db_ssl: Literal["disable", "require", "verify-full"] = "disable"
+    # CA that verify-full trusts; relative to apps/api. Supabase's root (prod-ca-2021.crt) is bundled.
+    db_ssl_root_cert: str = "certs/supabase-prod-ca-2021.crt"
     db_transaction_pooler: bool = False   # True for the Supabase transaction pooler (port 6543)
     # Per process (each uvicorn worker and the arq worker has its own pool). Total = processes x (size + overflow)
     # must stay under the database / session pooler's connection limit. Ignored with the transaction pooler.
@@ -50,6 +56,18 @@ class Settings(BaseSettings):
     # Set it to the period your legal advice requires. Payment records are kept separately, without the identity.
     account_retention_days: int = Field(default=30, ge=0, le=3650)
 
+    # two-factor sign-in (TOTP). Secrets are stored encrypted with this Fernet key
+    # (python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())").
+    # Changing the key makes every enrolled authenticator unusable, so keep it stable.
+    mfa_encryption_key: SecretStr = SecretStr("")
+    # admins must have two-factor on and have used it in this session to reach /admin endpoints
+    admin_mfa_required: bool = True
+    mfa_max_failures: int = 10            # per user per mfa_lockout_minutes, across challenges
+    mfa_lockout_minutes: int = 15
+
+    # Prometheus /metrics: only served when set, and only with "Authorization: Bearer <token>"
+    metrics_token: SecretStr = SecretStr("")
+
     google_client_id: str = ""
     google_client_secret: SecretStr = SecretStr("")
 
@@ -71,6 +89,10 @@ class Settings(BaseSettings):
     smtp_host: str = "localhost"
     smtp_port: int = 1025
     smtp_from: str = "AlgoPredict <no-reply@algopredict.local>"
+    # Email cost / abuse guards. Resend's free plan sends 100 emails a day and pauses accounts above 4 % bounces.
+    email_daily_budget: int = Field(default=90, ge=0)          # all automatic emails per UTC day
+    email_per_recipient_per_hour: int = Field(default=3, ge=1)  # stops flooding one inbox with links
+    rate_limit_email: str = "10/3600"                            # per IP, on endpoints that send email
 
     # rate limits: "<count>/<seconds>"
     rate_limit_default: str = "120/60"
@@ -113,6 +135,20 @@ class Settings(BaseSettings):
                 problems.append(f"{name.upper()} must be a random value of at least 32 characters")
         if not self.cookie_secure:
             problems.append("COOKIE_SECURE must be true")
+        if self.db_ssl != "verify-full" and not self.database_url.startswith("sqlite"):
+            problems.append("DB_SSL must be verify-full (require does not check the database's certificate)")
+        key = self.mfa_encryption_key.get_secret_value()
+        if not key:
+            problems.append("MFA_ENCRYPTION_KEY must be set (a Fernet key)")
+        else:
+            from cryptography.fernet import Fernet
+            try:
+                Fernet(key)
+            except ValueError:
+                problems.append("MFA_ENCRYPTION_KEY is not a valid Fernet key")
+        metrics = self.metrics_token.get_secret_value()
+        if metrics and len(metrics) < 32:
+            problems.append("METRICS_TOKEN must be at least 32 characters when set")
         if problems:
             raise ValueError("unsafe production settings: " + "; ".join(problems))
         return self

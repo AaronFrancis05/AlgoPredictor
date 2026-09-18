@@ -9,7 +9,7 @@ import { serverGet } from "@/lib/server-api";
 
 export const metadata: Metadata = {
   title: "Track record",
-  description: "Every AlgoPredict prediction graded against the real result: picks won, win rate by confidence tier and by month.",
+  description: "Check every pick we have published against the real result, with the win rate by confidence level and by month. Nothing is hidden or deleted.",
   alternates: { canonical: "/track-record" },
 };
 

@@ -10,11 +10,13 @@ import app.models  # noqa: F401  (register all tables)
 
 target_metadata = Base.metadata
 settings = get_settings()
+# DDL needs the table owner; the app's own role (DATABASE_URL in production) can only read and write rows
+url = settings.migration_database_url.get_secret_value() or settings.database_url
 
 
 def run_migrations_offline() -> None:
     """Emit SQL (alembic upgrade head --sql) without connecting."""
-    context.configure(url=settings.database_url, target_metadata=target_metadata, literal_binds=True,
+    context.configure(url=url, target_metadata=target_metadata, literal_binds=True,
                       dialect_opts={"paramstyle": "named"}, compare_type=True)
     with context.begin_transaction():
         context.run_migrations()
@@ -27,8 +29,8 @@ def _do_run(connection) -> None:
 
 
 async def run_migrations_online() -> None:
-    engine = create_async_engine(settings.database_url,
-                                 **engine_kwargs(settings.database_url, settings.db_ssl, settings.db_transaction_pooler))
+    engine = create_async_engine(url, **engine_kwargs(url, settings.db_ssl, settings.db_transaction_pooler,
+                                                      root_cert=settings.db_ssl_root_cert))
     async with engine.connect() as connection:
         await connection.run_sync(_do_run)
     await engine.dispose()

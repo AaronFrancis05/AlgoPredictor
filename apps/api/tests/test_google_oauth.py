@@ -157,6 +157,55 @@ async def test_cannot_unlink_google_without_a_password(client, google):
     assert r.status_code == 400
 
 
+# ------------------------------------------------------- the flow is bound to the browser that started it
+async def test_callback_in_another_browser_is_refused(client, google):
+    """Login CSRF: an attacker starts the flow, then sends the callback URL (their code + state) to a victim."""
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+    q = await _start(client)  # attacker's browser gets the binding cookie
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as victim:
+        r = await victim.get("/api/v1/auth/google/callback", params={"code": "good-code", "state": q["state"]})
+        assert r.headers["location"] == "https://web.example/login?error=google"
+        assert victim.cookies.get("ap_access") is None
+
+
+async def test_link_url_sent_to_someone_else_does_not_link(client, google):
+    """Link injection: the attacker's link URL (state carrying the attacker's user id) opened by a victim."""
+    from httpx import ASGITransport, AsyncClient
+
+    from app.main import app
+    attacker = await register_verified(client)
+    await login(client, attacker)
+    r = await client.post("/api/v1/me/google/link", headers=_csrf(client))
+    state = parse_qs(urlparse(r.json()["url"]).query)["state"][0]
+    google.update(email=f"victim-{uuid.uuid4().hex[:6]}@gmail.com", sub="sub-victim")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as victim:
+        r = await victim.get("/api/v1/auth/google/callback", params={"code": "good-code", "state": state})
+        assert r.headers["location"] == "https://web.example/login?error=google"
+    assert (await client.get("/api/v1/me")).json()["google_linked"] is False
+
+
+async def test_binding_cookie_is_http_only_and_scoped(client, google):
+    r = await client.get("/api/v1/auth/google/start")
+    cookie = next(c for c in r.headers.get_list("set-cookie") if c.startswith("ap_oauth="))
+    assert "HttpOnly" in cookie and "Path=/api/v1/auth/google" in cookie and "samesite=lax" in cookie.lower()
+
+
+async def test_google_sign_in_asks_for_the_second_factor(client, google):
+    from tests.helpers import enable_mfa, reset_rate_limits, totp_code
+    email = await register_verified(client)
+    await login(client, email)
+    secret, _ = await enable_mfa(client)
+    await reset_rate_limits()
+    google.update(email=email, sub="sub-mfa")
+    client.cookies.clear()
+    assert await _google_sign_in(client) == "https://web.example/login?mfa=1"
+    assert client.cookies.get("ap_access") is None and client.cookies.get("ap_mfa")
+    r = await client.post("/api/v1/auth/mfa/verify", json={"code": totp_code(secret, 1)})
+    assert r.status_code == 200 and r.json()["user"]["email"] == email
+
+
 def test_verify_google_id_token_tolerates_clock_skew(monkeypatch):
     # Google's clock is often slightly ahead of ours; an iat a few seconds in the future must still verify.
     import time
