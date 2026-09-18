@@ -6,7 +6,7 @@ import Link from "next/link";
 import { type ReactNode, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 
 import {
-  Disclaimer, KickoffTime, leagueName, LiveDot, LockedList, MatchList, PickCard, PicksTable,
+  Disclaimer, KickoffTime, leagueName, LiveDot, LockedList, PickCard, PicksTable,
 } from "@/components/picks";
 import { Button, ButtonLink, Card, EmptyState, Segmented, Select, Skeleton } from "@/components/ui";
 import { ErrorPanel } from "@/components/upgrade";
@@ -153,7 +153,7 @@ function UpgradeStrip({ data, entitlements }: { data: PicksDay; entitlements?: E
           <p className="text-xs text-muted">{planRule(entitlements) || "Upgrade to see every pick for the day."}</p>
         </div>
       </div>
-      <ButtonLink href="/pricing" className="shrink-0">Unlock all picks</ButtonLink>
+      <ButtonLink href="/account/plans" className="shrink-0">Unlock all picks</ButtonLink>
     </div>
   );
 }
@@ -180,7 +180,7 @@ function split(picks: Pick[], now: number): Parts {
   return parts;
 }
 
-function LiveStrip({ picks, now, day }: { picks: Pick[]; now: number; day: string }) {
+function LiveStrip({ picks, now, day, showValue }: { picks: Pick[]; now: number; day: string; showValue: boolean }) {
   return (
     <section className="space-y-3" aria-labelledby="live-now">
       <div className="flex items-center justify-between gap-3">
@@ -191,7 +191,9 @@ function LiveStrip({ picks, now, day }: { picks: Pick[]; now: number; day: strin
           Live centre <ArrowRight className="h-3.5 w-3.5" aria-hidden />
         </Link>
       </div>
-      <MatchList picks={picks} now={now} day={day} />
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {picks.map((p) => <PickCard key={p.prediction_id} pick={p} showValue={showValue} day={day} now={now} />)}
+      </div>
     </section>
   );
 }
@@ -292,7 +294,7 @@ export default function Dashboard() {
             {data.hidden_count > 0 && allParts.upcoming.length > 0 ? (
               <UpgradeStrip data={data} entitlements={me.data?.entitlements} />
             ) : null}
-            {parts.live.length > 0 ? <LiveStrip picks={parts.live} now={now} day={day} /> : null}
+            {parts.live.length > 0 ? <LiveStrip picks={parts.live} now={now} day={day} showValue={showValue} /> : null}
 
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
               <div className="flex flex-wrap items-center gap-2">

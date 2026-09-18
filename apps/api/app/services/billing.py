@@ -60,7 +60,7 @@ async def stripe_checkout(db: AsyncSession, user: User, price: Price) -> str:
         "client_reference_id": str(user.id),
         "subscription_data": {"metadata": {"user_id": str(user.id), "plan_code": price.plan_code}},
         "success_url": f"{s.public_web_url}/account/billing?checkout=success",
-        "cancel_url": f"{s.public_web_url}/pricing?checkout=cancelled",
+        "cancel_url": f"{s.public_web_url}/account/plans?checkout=cancelled",
         "allow_promotion_codes": True,
         "automatic_tax": {"enabled": False},
     })

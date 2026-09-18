@@ -10,7 +10,7 @@ export function ErrorPanel({ error }: { error: unknown }) {
       <Card className="flex flex-col items-start gap-3">
         <p className="font-semibold">This feature is part of a higher plan.</p>
         <p className="text-sm text-muted">Compare plans to unlock it. You can cancel any time.</p>
-        <ButtonLink href="/pricing">See plans</ButtonLink>
+        <ButtonLink href="/account/plans">See plans</ButtonLink>
       </Card>
     );
   }

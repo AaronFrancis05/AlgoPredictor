@@ -26,7 +26,7 @@ export const appNav = [
 export const accountNav = [
   { href: "/account", label: "Account" },
   { href: "/account/billing", label: "Billing" },
-  { href: "/pricing", label: "Plans" },
+  { href: "/account/plans", label: "Plans" },
   { href: "/track-record", label: "Track record" },
 ] as const;
 

@@ -8,6 +8,7 @@ import { z } from "zod";
 import { Alert, Button, ButtonLink, Card, EmptyState, PageHeader, Spinner } from "@/components/ui";
 import { ErrorPanel } from "@/components/upgrade";
 import { api } from "@/lib/api";
+import { useMe } from "@/lib/hooks";
 import { Redirect, Subscription } from "@/lib/schemas";
 
 function CheckoutNotice() {
@@ -19,6 +20,7 @@ function CheckoutNotice() {
 
 export default function Billing() {
   const [error, setError] = useState<string | null>(null);
+  const user = useMe().data;
   const q = useQuery({
     queryKey: ["subscriptions"],
     queryFn: () => api("/billing/subscription", z.array(Subscription)),
@@ -36,12 +38,20 @@ export default function Billing() {
 
   return (
     <div className="max-w-3xl space-y-6">
-      <PageHeader title="Billing" subtitle="Your subscriptions and payment settings." action={<ButtonLink href="/pricing">Change plan</ButtonLink>} />
+      <PageHeader title="Billing" subtitle="Your subscriptions and payment settings." action={<ButtonLink href="/account/plans">Change plan</ButtonLink>} />
       <Suspense fallback={null}><CheckoutNotice /></Suspense>
       {error ? <Alert tone="error">{error}</Alert> : null}
       {q.isLoading ? <Spinner /> : null}
       {q.error ? <ErrorPanel error={q.error} /> : null}
-      {q.data && q.data.length === 0 ? <EmptyState title="No subscriptions yet">You are on the Free plan.</EmptyState> : null}
+      {q.data && q.data.length === 0 && user ? (
+        <EmptyState title="No paid subscription">
+          {user.is_admin
+            ? "Admin account: every feature is included and nothing is billed."
+            : user.plan === "free"
+              ? "You are on the Free plan."
+              : <>You are on the <span className="capitalize">{user.plan}</span> plan without a paid subscription (for example from an access code).</>}
+        </EmptyState>
+      ) : null}
       {q.data?.map((s, i) => (
         <Card key={i} className="flex flex-wrap items-center justify-between gap-4">
           <div>

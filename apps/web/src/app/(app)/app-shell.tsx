@@ -5,13 +5,14 @@ import {
   CalendarDays,
   ChevronDown,
   CreditCard,
+  Gem,
   History,
   Layers,
+  LineChart,
   ListOrdered,
   LogOut,
   type LucideIcon,
   Radio,
-  Receipt,
   ShieldCheck,
   Trophy,
   UserRound,
@@ -24,7 +25,8 @@ import { Logo } from "@/components/site-chrome";
 import { Alert, Badge, Container, Skeleton } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { cn, initials } from "@/lib/format";
-import { useMe } from "@/lib/hooks";
+import { useMe, useNow } from "@/lib/hooks";
+import { phaseAt } from "@/lib/match";
 import { LivePicks, Message, type User } from "@/lib/schemas";
 import { accountNav, appNav } from "@/lib/site";
 
@@ -39,18 +41,33 @@ const navIcons: Record<string, LucideIcon> = {
 
 /** Number of matches in play, for the dot on the Live tab. Shares its cache with the Live page. */
 function useLiveCount(enabled: boolean): number {
+  const now = useNow(30_000);
   const q = useQuery({ queryKey: ["live"], queryFn: () => api("/picks/live", LivePicks), enabled,
                        refetchInterval: 60_000, staleTime: 15_000 });
-  return q.data?.picks.length ?? 0;
+  // same rule as the Live page: only matches still in play by the viewer's clock count
+  return (q.data?.picks ?? []).filter((p) => phaseAt(p, now) === "live").length;
 }
 
 const menuIcons: Record<string, LucideIcon> = {
   "/account": UserRound,
   "/account/billing": CreditCard,
-  "/pricing": Receipt,
-  "/track-record": ListOrdered,
+  "/account/plans": Gem,
+  "/track-record": LineChart,
   "/admin": ShieldCheck,
 };
+
+function MenuLink({ href, label, active, onClick }: { href: string; label: string; active: boolean; onClick: () => void }) {
+  const Icon = menuIcons[href];
+  return (
+    <Link role="menuitem" href={href} onClick={onClick} aria-current={active ? "page" : undefined}
+          className={cn("relative flex items-center gap-2.5 px-4 py-2 hover:bg-surface-2",
+            active ? "bg-surface-2 font-semibold text-fg" : "text-muted hover:text-fg")}>
+      <span aria-hidden className={cn("absolute inset-y-1 left-0 w-0.5", active ? "bg-brand" : "bg-transparent")} />
+      {Icon ? <Icon className={cn("h-4 w-4", active && "text-brand")} aria-hidden /> : null}
+      {label}
+    </Link>
+  );
+}
 
 function isActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
@@ -75,6 +92,10 @@ function UserMenu({ user, onSignOut }: { user: User; onSignOut: () => void }) {
     };
   }, [open]);
 
+  const name = user.full_name || user.email.split("@")[0];
+  const close = () => setOpen(false);
+  const [accountLinks, otherLinks] = [accountNav.filter((n) => n.href.startsWith("/account")),
+                                      accountNav.filter((n) => !n.href.startsWith("/account"))];
   return (
     <div ref={root} className="relative">
       <button
@@ -86,33 +107,44 @@ function UserMenu({ user, onSignOut }: { user: User; onSignOut: () => void }) {
         className={cn("flex items-center gap-2 rounded-md border border-transparent py-1 pl-1 pr-2 hover:border-border",
           open && "border-border bg-surface")}
       >
-        <span className="grid h-8 w-8 place-items-center rounded-sm bg-surface-2 text-xs font-bold">
+        <span className="grid h-8 w-8 place-items-center rounded-sm bg-brand text-xs font-bold text-brand-fg">
           {initials(user.full_name, user.email)}
         </span>
+        <span className="hidden max-w-32 truncate text-sm font-medium md:inline">{name.split(" ")[0]}</span>
         <ChevronDown className={cn("h-4 w-4 text-muted transition-transform", open && "rotate-180")} aria-hidden />
       </button>
       {open ? (
-        <div role="menu" className="absolute right-0 top-full z-50 mt-2 w-64 rounded-card border border-border bg-surface text-sm">
-          <div className="border-b border-border px-4 py-3">
-            <p className="truncate font-semibold">{user.full_name || user.email.split("@")[0]}</p>
-            <p className="truncate text-xs text-muted">{user.email}</p>
-            <div className="mt-2 flex gap-1">
-              <Badge className="capitalize">{user.plan} plan</Badge>
-              {user.is_admin ? <Badge className="border-brand/50 text-brand">Admin</Badge> : null}
+        <div role="menu" className="absolute right-0 top-full z-50 mt-2 w-72 overflow-hidden rounded-card border border-border bg-surface text-sm">
+          <div className="flex items-center gap-3 border-b border-border px-4 py-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-sm bg-brand text-sm font-bold text-brand-fg">
+              {initials(user.full_name, user.email)}
+            </span>
+            <div className="min-w-0">
+              <p className="truncate font-semibold">{name}</p>
+              <p className="truncate text-xs text-muted">{user.email}</p>
             </div>
           </div>
+          <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2.5">
+            <div>
+              <p className="text-[11px] uppercase tracking-wide text-muted">Plan</p>
+              <p className="font-semibold capitalize">{user.is_admin ? "Admin, all features" : user.plan}</p>
+            </div>
+            {user.plan === "free" && !user.is_admin ? (
+              <Link href="/account/plans" onClick={close}
+                    className="rounded-md bg-brand px-2.5 py-1.5 text-xs font-semibold text-brand-fg hover:brightness-95">
+                Upgrade
+              </Link>
+            ) : null}
+          </div>
           <div className="py-1">
-            {[...accountNav, ...(user.is_admin ? [{ href: "/admin", label: "Admin" }] : [])].map((n) => {
-              const Icon = menuIcons[n.href];
-              return (
-                <Link key={n.href} role="menuitem" href={n.href} onClick={() => setOpen(false)}
-                      className={cn("flex items-center gap-2.5 px-4 py-2 hover:bg-surface-2",
-                        pathname === n.href ? "font-semibold text-fg" : "text-muted hover:text-fg")}>
-                  {Icon ? <Icon className="h-4 w-4" aria-hidden /> : null}
-                  {n.label}
-                </Link>
-              );
-            })}
+            {accountLinks.map((n) => (
+              <MenuLink key={n.href} href={n.href} label={n.label} active={pathname === n.href} onClick={close} />
+            ))}
+          </div>
+          <div className="border-t border-border py-1">
+            {[...otherLinks, ...(user.is_admin ? [{ href: "/admin", label: "Admin" }] : [])].map((n) => (
+              <MenuLink key={n.href} href={n.href} label={n.label} active={isActive(pathname, n.href)} onClick={close} />
+            ))}
           </div>
           <div className="border-t border-border py-1">
             <button type="button" role="menuitem" onClick={onSignOut}
@@ -187,7 +219,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             {user ? (
               <>
                 {user.plan === "free" && !user.is_admin ? (
-                  <Link href="/pricing" className="hidden text-sm font-semibold text-brand hover:underline sm:inline">
+                  <Link href="/account/plans" className="hidden text-sm font-semibold text-brand hover:underline sm:inline">
                     Upgrade
                   </Link>
                 ) : null}

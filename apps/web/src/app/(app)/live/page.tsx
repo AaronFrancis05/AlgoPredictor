@@ -5,18 +5,17 @@ import { RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { useMemo } from "react";
 
-import { Disclaimer, LiveDot, PickCard } from "@/components/picks";
+import { Disclaimer, LiveDot, MatchList } from "@/components/picks";
 import { EmptyState, PageHeader, Skeleton } from "@/components/ui";
 import { ErrorPanel } from "@/components/upgrade";
 import { api } from "@/lib/api";
-import { useMe, useNow } from "@/lib/hooks";
+import { useNow } from "@/lib/hooks";
 import { phaseAt } from "@/lib/match";
 import { LivePicks } from "@/lib/schemas";
 
 const REFRESH_MS = 30_000;
 
 export default function LivePage() {
-  const me = useMe();
   const now = useNow(15_000);
   const q = useQuery({
     queryKey: ["live"],
@@ -26,7 +25,6 @@ export default function LivePage() {
   });
   // a match can reach full time between refreshes: keep only what is still in play by the viewer's clock too
   const live = useMemo(() => (q.data?.picks ?? []).filter((p) => phaseAt(p, now) === "live"), [q.data, now]);
-  const showValue = Boolean(me.data?.entitlements.value_flags);
   const updated = q.dataUpdatedAt
     ? new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(q.dataUpdatedAt)
     : null;
@@ -44,8 +42,8 @@ export default function LivePage() {
         ) : null}
       />
       {q.isLoading ? (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3" aria-busy aria-label="Loading live matches">
-          {Array.from({ length: 3 }, (_, i) => <Skeleton key={i} className="h-60 w-full" />)}
+        <div className="space-y-px" aria-busy aria-label="Loading live matches">
+          {Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="h-14 w-full" />)}
         </div>
       ) : null}
       {q.error && !q.data ? <ErrorPanel error={q.error} /> : null}
@@ -67,9 +65,7 @@ export default function LivePage() {
               <h2 id="in-play" className="flex items-center gap-2 text-sm font-semibold">
                 <LiveDot /> In play <span className="num font-normal text-muted">{live.length}</span>
               </h2>
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {live.map((p) => <PickCard key={p.prediction_id} pick={p} showValue={showValue} now={now} />)}
-              </div>
+              <MatchList picks={live} now={now} />
             </section>
           )}
           <p className="text-xs text-muted">

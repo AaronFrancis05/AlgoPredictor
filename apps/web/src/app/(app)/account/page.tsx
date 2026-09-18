@@ -162,7 +162,7 @@ export default function Account() {
             </div>
           </div>
         </div>
-        {user.plan === "free" && !user.is_admin ? <ButtonLink href="/pricing">Upgrade</ButtonLink> : null}
+        {user.plan === "free" && !user.is_admin ? <ButtonLink href="/account/plans">Upgrade</ButtonLink> : null}
       </div>
 
       {msg ? <div className="mb-6"><Alert tone={msg.tone}>{msg.text}</Alert></div> : null}
@@ -179,7 +179,7 @@ export default function Account() {
             ) : (
               <div className="flex gap-2">
                 <ButtonLink href="/account/billing" variant="secondary">Billing</ButtonLink>
-                <ButtonLink href="/pricing" variant={user.plan === "free" ? "primary" : "secondary"}>Change plan</ButtonLink>
+                <ButtonLink href="/account/plans" variant={user.plan === "free" ? "primary" : "secondary"}>Change plan</ButtonLink>
               </div>
             )}
           </div>
@@ -243,7 +243,7 @@ export default function Account() {
           ) : (
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-sm text-muted">API access is included in the Elite plan.</p>
-              <ButtonLink href="/pricing" variant="secondary">Compare plans</ButtonLink>
+              <ButtonLink href="/account/plans" variant="secondary">Compare plans</ButtonLink>
             </div>
           )}
         </Card>

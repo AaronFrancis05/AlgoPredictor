@@ -4,12 +4,11 @@ import { z } from "zod";
 
 import { JsonLd } from "@/components/json-ld";
 import { Disclaimer } from "@/components/picks";
+import { PricingTable } from "@/components/pricing-table";
 import { Alert, Container, PageHeader } from "@/components/ui";
 import { Plan } from "@/lib/schemas";
 import { serverGet } from "@/lib/server-api";
 import { site } from "@/lib/site";
-
-import { PricingTable } from "./pricing-table";
 
 export const metadata: Metadata = {
   title: "Pricing",

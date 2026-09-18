@@ -4,7 +4,7 @@ import { Check, Minus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
-import { Alert, Badge, Button, Card } from "@/components/ui";
+import { Alert, Badge, Button, ButtonLink, Card } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { cn, formatPrice } from "@/lib/format";
 import { type Plan, Redirect } from "@/lib/schemas";
@@ -23,7 +23,11 @@ function hasFeature(plan: Plan, key: (typeof featureRows)[number]["key"]) {
   return Boolean(plan.entitlements[key]);
 }
 
-export function PricingTable({ plans }: { plans: Plan[] }) {
+/**
+ * Plan cards with checkout. Signed-in pages pass `current` (the user's plan code) so the cards show what they
+ * already have instead of sign-up buttons; admins get every feature without billing.
+ */
+export function PricingTable({ plans, current, isAdmin = false }: { plans: Plan[]; current?: string; isAdmin?: boolean }) {
   const router = useRouter();
   const currencies = useMemo(
     () => Array.from(new Set(plans.flatMap((p) => p.prices.map((x) => x.currency)))).sort(),
@@ -85,12 +89,17 @@ export function PricingTable({ plans }: { plans: Plan[] }) {
       <div className="grid gap-5 lg:grid-cols-3">
         {plans.map((plan) => {
           const price = plan.prices.find((x) => x.currency === currency && x.interval === interval);
-          const featured = plan.code === "pro";
+          const signedIn = current !== undefined;
+          const isCurrent = signedIn && !isAdmin && plan.code === current;
+          const currentRank = plans.find((p) => p.code === current)?.rank ?? 0;
+          const below = signedIn && !isAdmin && plan.rank < currentRank;
+          const featured = signedIn ? isCurrent : plan.code === "pro";
           return (
             <Card key={plan.code} className={cn("flex flex-col", featured && "border-brand")}>
               <div className="flex items-center justify-between">
                 <h2 className="text-lg font-bold">{plan.name}</h2>
-                {featured ? <Badge className="border-brand/50 text-brand">Most popular</Badge> : null}
+                {isCurrent ? <Badge className="border-brand/50 text-brand">Your plan</Badge>
+                  : !signedIn && featured ? <Badge className="border-brand/50 text-brand">Most popular</Badge> : null}
               </div>
               <p className="mt-2 min-h-10 text-sm text-muted">{plan.description}</p>
               <p className="mt-6 text-3xl font-extrabold tabular-nums">
@@ -123,7 +132,13 @@ export function PricingTable({ plans }: { plans: Plan[] }) {
                 })}
               </ul>
               <div className="mt-6 space-y-2">
-                {plan.code === "free" ? (
+                {isAdmin ? (
+                  <Button variant="secondary" className="w-full" disabled>Included with admin access</Button>
+                ) : isCurrent ? (
+                  <Button variant="secondary" className="w-full" disabled>Current plan</Button>
+                ) : below ? (
+                  <ButtonLink href="/account/billing" variant="secondary" className="w-full">Change in billing</ButtonLink>
+                ) : plan.code === "free" ? (
                   <Button variant="secondary" className="w-full" onClick={() => router.push("/register")}>
                     Create free account
                   </Button>
