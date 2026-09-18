@@ -1,12 +1,11 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { connection } from "next/server";
 
 import { JsonLd } from "@/components/json-ld";
-import { Disclaimer, PickCard } from "@/components/picks";
+import { Disclaimer } from "@/components/picks";
 import { ButtonLink, Container } from "@/components/ui";
 import { pct } from "@/lib/format";
-import { PicksDay, TrackRecord } from "@/lib/schemas";
+import { TrackRecord } from "@/lib/schemas";
 import { serverGet } from "@/lib/server-api";
 import { site } from "@/lib/site";
 
@@ -36,11 +35,7 @@ const tiers = [
 
 export default async function Home() {
   await connection(); // per-request render (CSP nonce); data below comes from the tagged fetch cache
-  const [today, record] = await Promise.all([
-    serverGet("/picks", PicksDay, { revalidate: 120, tags: ["picks"] }),
-    serverGet("/track-record", TrackRecord, { revalidate: 600, tags: ["track-record"] }),
-  ]);
-  const teaser = today?.picks.slice(0, 3) ?? [];
+  const record = await serverGet("/track-record", TrackRecord, { revalidate: 600, tags: ["track-record"] });
   const rates = record?.backtest.tier_hit_rates ?? { Strong: 0.745, Medium: 0.57, Lean: 0.419 };
   const bt = record?.backtest;
 
@@ -116,18 +111,6 @@ export default async function Home() {
           </figure>
         </Container>
       </section>
-
-      {teaser.length ? (
-        <Container className="pt-16">
-          <div className="flex items-baseline justify-between gap-4">
-            <h2 className="text-2xl font-bold tracking-tight">Today&apos;s first picks</h2>
-            <Link href="/register" className="text-sm text-muted underline underline-offset-4 hover:text-fg">See the full slate</Link>
-          </div>
-          <div className="mt-6 grid gap-4 md:grid-cols-3">
-            {teaser.map((p) => <PickCard key={p.prediction_id} pick={p} />)}
-          </div>
-        </Container>
-      ) : null}
 
       <Container className="grid gap-10 py-20 lg:grid-cols-[1fr_2fr]">
         <div>

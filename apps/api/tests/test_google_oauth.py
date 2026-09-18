@@ -155,3 +155,21 @@ async def test_cannot_unlink_google_without_a_password(client, google):
     await _google_sign_in(client)
     r = await client.delete("/api/v1/me/google", headers=_csrf(client))
     assert r.status_code == 400
+
+
+def test_verify_google_id_token_tolerates_clock_skew(monkeypatch):
+    # Google's clock is often slightly ahead of ours; an iat a few seconds in the future must still verify.
+    import time
+    from types import SimpleNamespace
+
+    import jwt
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    monkeypatch.setattr(auth_router.settings, "google_client_id", "test-client-id")
+    monkeypatch.setattr(auth_router, "_jwks_client",
+                        SimpleNamespace(get_signing_key_from_jwt=lambda t: SimpleNamespace(key=key.public_key())))
+    now = int(time.time())
+    token = jwt.encode({"iss": "https://accounts.google.com", "aud": "test-client-id", "sub": "s", "nonce": "n",
+                        "iat": now + 5, "exp": now + 3600}, key, algorithm="RS256")
+    assert auth_router._verify_google_id_token(token, "n")["sub"] == "s"

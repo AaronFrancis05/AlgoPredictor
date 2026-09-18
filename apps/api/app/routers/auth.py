@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.logging import get_logger
 from app.core.ratelimit import rate_limit
 from app.core.redis import get_redis
 from app.core.security import hash_password
@@ -28,6 +29,7 @@ from app.services.audit import audit
 from app.services.users import user_out
 
 settings = get_settings()
+log = get_logger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
 auth_limit = rate_limit("auth", settings.rate_limit_auth, fail_closed=True)
 
@@ -35,6 +37,8 @@ GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN = "https://oauth2.googleapis.com/token"  # noqa: S105 - endpoint URL, not a secret
 GOOGLE_JWKS = "https://www.googleapis.com/oauth2/v3/certs"
 _jwks_client: jwt.PyJWKClient | None = None
+# PyJWT rejects a token whose iat is later than our clock; Google's clock is often a second or two ahead.
+GOOGLE_CLOCK_LEEWAY_SECONDS = 60
 
 
 async def _auth_out(db: AsyncSession, user: User, csrf: str) -> AuthOut:
@@ -188,7 +192,8 @@ def _verify_google_id_token(token: str, nonce: str) -> dict:
         _jwks_client = jwt.PyJWKClient(GOOGLE_JWKS, cache_keys=True)
     key = _jwks_client.get_signing_key_from_jwt(token)
     claims = jwt.decode(token, key.key, algorithms=["RS256"], audience=settings.google_client_id,
-                        issuer=["https://accounts.google.com", "accounts.google.com"])
+                        issuer=["https://accounts.google.com", "accounts.google.com"],
+                        leeway=GOOGLE_CLOCK_LEEWAY_SECONDS)
     if claims.get("nonce") != nonce:
         raise jwt.InvalidTokenError("nonce mismatch")
     return claims
@@ -203,6 +208,7 @@ async def _exchange_google_code(code: str, verifier: str) -> str | None:
             "redirect_uri": _google_redirect_uri(),
             "grant_type": "authorization_code", "code_verifier": verifier})
     if r.status_code != 200:
+        log.warning("google_oauth_failed", reason="token_exchange", status=r.status_code)
         return None
     return r.json().get("id_token")
 
@@ -233,6 +239,7 @@ async def google_callback(request: Request, code: str = "", state: str = "",
     fail = _web_redirect("/login?error=google")
     stored = await get_redis().getdel(f"oauth:google:{state}") if state else None
     if not code or not stored:
+        log.warning("google_oauth_failed", reason="missing_code" if not code else "unknown_or_used_state")
         return fail
     data = json.loads(stored)
     id_token = await _exchange_google_code(code, data["verifier"])
@@ -240,9 +247,11 @@ async def google_callback(request: Request, code: str = "", state: str = "",
         return fail
     try:
         claims = await asyncio.to_thread(_verify_google_id_token, id_token, data["nonce"])
-    except jwt.PyJWTError:
+    except jwt.PyJWTError as exc:
+        log.warning("google_oauth_failed", reason="id_token_invalid", error=type(exc).__name__, detail=str(exc))
         return fail
     if not claims.get("email_verified"):
+        log.warning("google_oauth_failed", reason="email_not_verified")
         return fail
     if data.get("link_user_id"):
         return await _link_google(db, request, data["link_user_id"], claims["sub"])
@@ -267,6 +276,7 @@ async def google_callback(request: Request, code: str = "", state: str = "",
         db.add(OAuthAccount(user_id=user.id, provider="google", subject=claims["sub"]))
         await audit(db, "google_linked", request, user.id)
     if not user.is_active:
+        log.warning("google_oauth_failed", reason="user_inactive", user_id=str(user.id))
         return fail
     user.email_verified_at = user.email_verified_at or datetime.now(UTC)
     await audit(db, "login_google", request, user.id)

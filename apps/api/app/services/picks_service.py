@@ -71,8 +71,12 @@ def serialise(d: dict, plan: Plan, locked: bool = False) -> PickOut:
                    model_version=d["model_version"], result=d["result"], correct=d["correct"])
 
 
-def apply_plan(day_picks: list[dict], plan: Plan, now: datetime) -> tuple[list[PickOut], int]:
-    """Free plan: only the N highest-confidence picks, each revealed X hours before kick-off; others locked."""
+def apply_plan(day_picks: list[dict], plan: Plan, now: datetime,
+               signed_in: bool = True) -> tuple[list[PickOut], int]:
+    """Free plan: only the N highest-confidence picks, each revealed X hours before kick-off; others locked.
+    Signed-out visitors see fixtures only: every pick is locked until they sign in."""
+    if not signed_in:
+        return [serialise(d, plan, locked=True) for d in day_picks], len(day_picks)
     ent = plan.entitlements
     limit = ent.get("picks_per_day")
     reveal = ent.get("reveal_hours_before_kickoff")

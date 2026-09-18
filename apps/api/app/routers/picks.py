@@ -28,13 +28,14 @@ def _today() -> date:
 @router.get("/picks", response_model=PicksDayOut, dependencies=[Depends(product_limit)])
 async def picks_for_day(response: Response, day: date | None = Query(default=None, alias="date"),
                         user: User | None = Depends(optional_user), db: AsyncSession = Depends(get_db)) -> PicksDayOut:
-    """Picks for one day. Anonymous visitors and the Free plan see the free allocation; the rest is locked."""
+    """Picks for one day. Signed-out visitors see every pick locked; the Free plan sees its free allocation and
+    paid plans see everything their entitlements allow."""
     day = day or _today()
     if user is not None and (user.email_verified_at is None or user.age_confirmed_at is None):
         user = None  # unverified accounts get the anonymous view
     plan = await active_plan(db, user.id if user else None)
     rows = await ps.picks_between(db, day, day)
-    items, hidden = ps.apply_plan(rows, plan, datetime.now(UTC))
+    items, hidden = ps.apply_plan(rows, plan, datetime.now(UTC), signed_in=user is not None)
     response.headers["Cache-Control"] = "private, max-age=60" if user else "public, max-age=60"
     return PicksDayOut(date=day, plan=plan.code, picks=items, total_published=len(rows), hidden_count=hidden,
                        tier_hit_rates=settings.tier_hit_rates, tier_hit_rates_source=settings.tier_hit_rates_source,
