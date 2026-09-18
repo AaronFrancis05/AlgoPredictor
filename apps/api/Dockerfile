@@ -20,8 +20,8 @@ COPY migrations ./migrations
 COPY app ./app
 USER app
 EXPOSE 8000
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4)"
+# No Docker HEALTHCHECK: the same image runs the arq worker, which has no HTTP port. Configure the health check
+# on the platform for the API service only (GET /healthz on port 8000).
 # --no-proxy-headers: uvicorn must not rewrite the client address from X-Forwarded-For (clients can forge it);
 # the app decides whom to trust (X-Client-IP + PROXY_SHARED_SECRET, or TRUSTED_PROXY_COUNT).
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-proxy-headers", "--workers", "2"]
