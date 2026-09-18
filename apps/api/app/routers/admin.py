@@ -9,8 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.deps import admin_user
 from app.models import ROLE_ADMIN, AccessToken, Pick, PickResult, Subscription, User, WebhookEvent
-from app.schemas import AccessTokenCreatedOut, AccessTokenIn, AccessTokenOut, Message, RoleIn
+from app.schemas import AccessTokenCreatedOut, AccessTokenIn, AccessTokenOut, LiveLinkIn, Message, RoleIn
 from app.services import access_tokens as tokens
+from app.services import livescores
 from app.services.audit import audit
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(admin_user)])
@@ -56,6 +57,37 @@ async def set_role(body: RoleIn, request: Request, admin: User = Depends(admin_u
     await db.commit()
     await tokens.after_change()
     return Message(message=f"{user.email} is now {body.role}.")
+
+
+# ------------------------------------------------------------------------------------------------ live scores
+@router.get("/livescores")
+async def livescore_status(db: AsyncSession = Depends(get_db)) -> dict:
+    """Feed health, request budget, and matches that need an admin to pick their feed fixture."""
+    return await livescores.admin_status(db, datetime.now(UTC))
+
+
+@router.post("/livescores/link", response_model=Message)
+async def livescore_link(body: LiveLinkIn, request: Request, admin: User = Depends(admin_user),
+                         db: AsyncSession = Depends(get_db)) -> Message:
+    try:
+        m = await livescores.admin_link(db, body.match_key, body.fixture_id, datetime.now(UTC))
+    except LookupError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Unknown match") from e
+    except ValueError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e)) from e
+    await audit(db, "livescore_linked", request, admin.id, match=body.match_key, fixture=body.fixture_id)
+    await db.commit()
+    return Message(message=f"{m.home_team} v {m.away_team}: "
+                           + ("linked" if body.fixture_id is not None else "unlinked"))
+
+
+@router.post("/livescores/sync", response_model=Message)
+async def livescore_sync(db: AsyncSession = Depends(get_db)) -> Message:
+    """Fetch fresh fixture lists now and try to link every match (uses feed requests from the daily budget)."""
+    now = datetime.now(UTC)
+    await livescores.ensure_rows(db, now)
+    made = await livescores.link_matches(db, now, force=True)
+    return Message(message=f"{made} match(es) linked.")
 
 
 # ------------------------------------------------------------------------------------------------ access tokens

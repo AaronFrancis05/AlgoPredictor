@@ -7,7 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.cache import cached
 from app.core.config import get_settings
 from app.models import Pick, PickResult, Plan
-from app.schemas import PickOut
+from app.schemas import LiveOut, PickOut
+from app.services import livescores
 from app.services.products import Leg
 
 CACHE_NS = "picks"
@@ -69,6 +70,37 @@ def serialise(d: dict, plan: Plan, locked: bool = False) -> PickOut:
                    edge=round(d["edge"], 3) if show_value and d["edge"] is not None else None,
                    value_flag=bool(d["value_flag"]) if show_value else None, locked=False, is_demo=d["is_demo"],
                    model_version=d["model_version"], result=d["result"], correct=d["correct"])
+
+
+async def with_status(db: AsyncSession, items: list[PickOut], now: datetime) -> list[PickOut]:
+    """Set each pick's match phase, live score and outcome (official grade first, else the feed's full time)."""
+    if not items:
+        return items
+    days = [p.kickoff_date for p in items]
+    states = await livescores.live_states(db, min(days), max(days))
+    for p in items:
+        st = states.get(livescores.match_key(p.kickoff_date, p.home_team, p.away_team))
+        p.phase = livescores.phase_of(p.kickoff_at, p.result, st, now, has_time=bool(p.kickoff_time))
+        p.live = LiveOut(**st) if st and p.phase != "upcoming" else None
+        if p.pick is None:
+            continue
+        if p.correct is not None:
+            p.outcome, p.outcome_official = ("won" if p.correct else "lost"), True
+        elif p.phase == "finished" and st:
+            side = livescores.outcome_from_goals(st["home_goals"], st["away_goals"])
+            p.outcome = None if side is None else "won" if side == p.pick else "lost"
+    return items
+
+
+def apply_plan_by_day(rows: list[dict], plan: Plan, now: datetime, signed_in: bool = True) -> list[PickOut]:
+    """apply_plan per kick-off date: plan allowances are per day."""
+    by_day: dict[str, list[dict]] = {}
+    for r in rows:
+        by_day.setdefault(r["kickoff_date"], []).append(r)
+    out: list[PickOut] = []
+    for day_rows in by_day.values():
+        out.extend(apply_plan(day_rows, plan, now, signed_in=signed_in)[0])
+    return out
 
 
 def apply_plan(day_picks: list[dict], plan: Plan, now: datetime,

@@ -1,14 +1,16 @@
 "use client";
 
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CalendarDays,
   ChevronDown,
   CreditCard,
+  History,
   Layers,
   ListOrdered,
   LogOut,
   type LucideIcon,
+  Radio,
   Receipt,
   ShieldCheck,
   Trophy,
@@ -23,15 +25,25 @@ import { Alert, Badge, Container, Skeleton } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { cn, initials } from "@/lib/format";
 import { useMe } from "@/lib/hooks";
-import { Message, type User } from "@/lib/schemas";
+import { LivePicks, Message, type User } from "@/lib/schemas";
 import { accountNav, appNav } from "@/lib/site";
 
 const navIcons: Record<string, LucideIcon> = {
   "/dashboard": CalendarDays,
+  "/live": Radio,
   "/top-picks": ListOrdered,
   "/slip-builder": Layers,
   "/jackpot": Trophy,
+  "/history": History,
 };
+
+/** Number of matches in play, for the dot on the Live tab. Shares its cache with the Live page. */
+function useLiveCount(enabled: boolean): number {
+  const q = useQuery({ queryKey: ["live"], queryFn: () => api("/picks/live", LivePicks), enabled,
+                       refetchInterval: 60_000, staleTime: 15_000 });
+  return q.data?.picks.length ?? 0;
+}
+
 const menuIcons: Record<string, LucideIcon> = {
   "/account": UserRound,
   "/account/billing": CreditCard,
@@ -114,21 +126,27 @@ function UserMenu({ user, onSignOut }: { user: User; onSignOut: () => void }) {
   );
 }
 
-function NavLinks({ pathname, compact = false }: { pathname: string; compact?: boolean }) {
+function NavLinks({ pathname, compact = false, liveCount = 0 }: { pathname: string; compact?: boolean; liveCount?: number }) {
   return (
     <>
       {appNav.map((n) => {
         const Icon = navIcons[n.href];
         const active = isActive(pathname, n.href);
+        const showLive = n.href === "/live" && liveCount > 0;
         return (
           <Link key={n.href} href={n.href} aria-current={active ? "page" : undefined}
                 className={cn(
                   "relative flex shrink-0 items-center gap-2 whitespace-nowrap text-sm transition-colors",
-                  compact ? "px-3 py-2.5" : "h-full px-3",
+                  compact ? "px-3 py-2.5" : "h-full px-2.5 lg:px-3",
                   active ? "font-semibold text-fg" : "text-muted hover:text-fg",
                 )}>
-            {Icon ? <Icon className={cn("h-4 w-4", active ? "text-brand" : "")} aria-hidden /> : null}
+            {Icon ? <Icon className={cn("h-4 w-4", active ? "text-brand" : "", showLive && "text-danger")} aria-hidden /> : null}
             {n.label}
+            {showLive ? (
+              <span className="num rounded-sm bg-danger/15 px-1 text-[10px] font-bold text-danger" aria-label={`${liveCount} in play`}>
+                {liveCount}
+              </span>
+            ) : null}
             <span aria-hidden className={cn("absolute inset-x-3 bottom-0 h-0.5", active ? "bg-brand" : "bg-transparent")} />
           </Link>
         );
@@ -156,13 +174,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   const user = me.data;
+  const liveCount = useLiveCount(Boolean(user?.email_verified && user?.age_confirmed));
   return (
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-40 border-b border-border bg-bg/90 backdrop-blur">
         <Container className="flex h-16 items-center gap-6">
           <Logo />
-          <nav aria-label="App" className="hidden h-full items-stretch md:flex">
-            <NavLinks pathname={pathname} />
+          <nav aria-label="App" className="hidden h-full items-stretch lg:flex">
+            <NavLinks pathname={pathname} liveCount={liveCount} />
           </nav>
           <div className="ml-auto flex items-center gap-3">
             {user ? (
@@ -182,8 +201,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             )}
           </div>
         </Container>
-        <nav aria-label="App" className="scrollbar-none flex overflow-x-auto border-t border-border px-2 md:hidden">
-          <NavLinks pathname={pathname} compact />
+        <nav aria-label="App" className="scrollbar-none flex overflow-x-auto border-t border-border px-2 lg:hidden">
+          <NavLinks pathname={pathname} compact liveCount={liveCount} />
         </nav>
       </header>
       <main id="main" className="flex-1 py-8">

@@ -7,10 +7,21 @@ import { Alert, Card, PageHeader, Spinner } from "@/components/ui";
 import { ErrorPanel } from "@/components/upgrade";
 import { api } from "@/lib/api";
 import { isoDate, pct } from "@/lib/format";
-import { Jackpot } from "@/lib/schemas";
+import { useNow } from "@/lib/hooks";
+import { Jackpot, type Pick } from "@/lib/schemas";
+
+/** "Won ✓" / "Lost" once the day's legs are decided (either leg losing settles it). */
+function DayTally({ legs }: { legs: Pick[] }) {
+  if (!legs.length) return null;
+  if (legs.some((l) => l.outcome === "lost")) return <span className="mr-2 font-semibold text-danger">Day lost ·</span>;
+  if (legs.every((l) => l.outcome === "won")) return <span className="mr-2 font-semibold text-brand">Day won ✓ ·</span>;
+  return null;
+}
 
 export default function JackpotPage() {
-  const q = useQuery({ queryKey: ["jackpot", isoDate()], queryFn: () => api(`/jackpot?week_of=${isoDate()}`, Jackpot) });
+  const now = useNow(30_000);
+  const q = useQuery({ queryKey: ["jackpot", isoDate()], queryFn: () => api(`/jackpot?week_of=${isoDate()}`, Jackpot),
+                       refetchInterval: 60_000 });
   const fmt = (d: string) =>
     new Intl.DateTimeFormat(undefined, { weekday: "long", day: "numeric", month: "short" }).format(new Date(`${d}T12:00:00Z`));
 
@@ -36,10 +47,12 @@ export default function JackpotPage() {
             <section key={d.date} aria-labelledby={`day-${d.date}`} className="space-y-3">
               <div className="flex items-baseline justify-between">
                 <h2 id={`day-${d.date}`} className="text-lg font-semibold">{fmt(d.date)}</h2>
-                <p className="text-sm text-muted">Both win: {pct(d.combined_probability)}</p>
+                <p className="text-sm text-muted"><DayTally legs={d.legs} /> Both win: {pct(d.combined_probability)}</p>
               </div>
               {d.legs.length ? (
-                <div className="grid gap-4 md:grid-cols-2">{d.legs.map((p) => <PickCard key={p.prediction_id} pick={p} showValue />)}</div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  {d.legs.map((p) => <PickCard key={p.prediction_id} pick={p} showValue now={now} />)}
+                </div>
               ) : (
                 <Card className="text-sm text-muted">No picks published for this day yet.</Card>
               )}

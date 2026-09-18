@@ -73,6 +73,16 @@ class Settings(BaseSettings):
     rate_limit_auth: str = "5/60"
     rate_limit_products: str = "30/60"
 
+    # live scores (display only: never used for grading or by the model). API-Football (api-sports.io);
+    # empty key = no live feed, matches still move to Live / History by kick-off time and the official result.
+    api_football_key: SecretStr = SecretStr("")
+    api_football_url: str = "https://v3.football.api-sports.io"
+    livescore_daily_budget: int = Field(default=100, ge=0)   # provider requests per UTC day (free plan: 100)
+    livescore_reserve: int = Field(default=5, ge=0)           # kept back for fixture-list syncs and admin use
+    livescore_min_interval_seconds: int = Field(default=60, ge=15)
+    # a match with no feed counts as in play for this long after kick-off, then "awaiting result"
+    match_live_minutes: int = Field(default=115, ge=90, le=180)
+
     # measured walk-forward hit rates of the current champion (reports/train_20260917_0847.md).
     # Only the hit rates and the match count are public; model name, method and RPS stay internal.
     tier_hit_rates: dict[str, float] = Field(

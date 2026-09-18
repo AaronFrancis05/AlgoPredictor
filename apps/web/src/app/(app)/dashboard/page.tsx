@@ -1,15 +1,19 @@
 "use client";
 
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, LayoutGrid, Lock, Rows3 } from "lucide-react";
+import { ArrowRight, ChevronLeft, ChevronRight, History as HistoryIcon, LayoutGrid, Lock, Rows3 } from "lucide-react";
+import Link from "next/link";
 import { type ReactNode, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 
-import { Disclaimer, KickoffTime, leagueName, LockedList, PickCard, PicksTable } from "@/components/picks";
+import {
+  Disclaimer, KickoffTime, leagueName, LiveDot, LockedList, MatchList, PickCard, PicksTable,
+} from "@/components/picks";
 import { Button, ButtonLink, Card, EmptyState, Segmented, Select, Skeleton } from "@/components/ui";
 import { ErrorPanel } from "@/components/upgrade";
 import { api } from "@/lib/api";
 import { cn, isoDate } from "@/lib/format";
-import { useMe } from "@/lib/hooks";
+import { useMe, useNow } from "@/lib/hooks";
+import { phaseAt } from "@/lib/match";
 import { type Entitlements, type Pick, PicksDay } from "@/lib/schemas";
 
 type Sort = "kickoff" | "confidence";
@@ -101,21 +105,18 @@ function DayStrip({ day, onPick }: { day: string; onPick: (d: string) => void })
   );
 }
 
-function Summary({ data, day, now }: { data: PicksDay; day: string; now: number }) {
-  const open = data.picks.filter((p) => !p.locked);
-  const tiers = ["Strong", "Medium", "Lean"].map((t) => [t, open.filter((p) => p.tier === t).length] as const);
-  const leagues = new Set(data.picks.map((p) => p.league_code)).size;
-  const next = data.picks.filter((p) => new Date(p.kickoff_at).getTime() > now)
-    .sort((a, b) => a.kickoff_at.localeCompare(b.kickoff_at))[0];
+function Summary({ data, day, parts }: { data: PicksDay; day: string; parts: Parts }) {
+  const next = [...parts.upcoming].sort((a, b) => a.kickoff_at.localeCompare(b.kickoff_at))[0];
   const cells: { label: string; value: ReactNode; hint?: string }[] = [
     { label: "Published", value: data.total_published },
-    { label: "Unlocked for you", value: open.length },
+    { label: "Still to play", value: parts.upcoming.length },
     {
-      label: "Strong / Medium / Lean",
-      value: tiers.map(([, n]) => n).join(" / "),
-      hint: "Unlocked picks per confidence tier",
+      label: "Live now",
+      value: parts.live.length ? (
+        <span className="inline-flex items-center gap-2 text-danger"><LiveDot />{parts.live.length}</span>
+      ) : 0,
     },
-    { label: "Leagues", value: leagues },
+    { label: "Finished", value: parts.done.length, hint: "Played matches move to History" },
     { label: "Next kick-off", value: next ? <KickoffTime iso={next.kickoff_at} day={day} /> : "n/a" },
   ];
   return (
@@ -168,6 +169,52 @@ function LoadingGrid() {
   );
 }
 
+type Parts = { upcoming: Pick[]; live: Pick[]; done: Pick[] };
+
+function split(picks: Pick[], now: number): Parts {
+  const parts: Parts = { upcoming: [], live: [], done: [] };
+  for (const p of picks) {
+    const ph = phaseAt(p, now);
+    (ph === "upcoming" ? parts.upcoming : ph === "live" ? parts.live : parts.done).push(p);
+  }
+  return parts;
+}
+
+function LiveStrip({ picks, now, day }: { picks: Pick[]; now: number; day: string }) {
+  return (
+    <section className="space-y-3" aria-labelledby="live-now">
+      <div className="flex items-center justify-between gap-3">
+        <h2 id="live-now" className="flex items-center gap-2 text-sm font-semibold">
+          <LiveDot /> Live now <span className="num font-normal text-muted">{picks.length}</span>
+        </h2>
+        <Link href="/live" className="inline-flex items-center gap-1 text-xs font-semibold text-brand hover:underline">
+          Live centre <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+        </Link>
+      </div>
+      <MatchList picks={picks} now={now} day={day} />
+    </section>
+  );
+}
+
+function FinishedNote({ count, day }: { count: number; day: string }) {
+  return (
+    <div className="flex flex-col gap-3 rounded-card border border-border bg-surface px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-sm bg-surface-2">
+          <HistoryIcon className="h-4 w-4 text-muted" aria-hidden />
+        </span>
+        <div>
+          <p className="text-sm font-semibold">
+            {count} {count === 1 ? "match" : "matches"} on this day {count === 1 ? "has" : "have"} been played.
+          </p>
+          <p className="text-xs text-muted">Scores, results and whether each pick won are in History.</p>
+        </div>
+      </div>
+      <ButtonLink href={`/history?from=${day}&to=${day}`} variant="secondary" className="shrink-0">View results</ButtonLink>
+    </div>
+  );
+}
+
 function sortPicks(picks: Pick[], sort: Sort): Pick[] {
   const out = [...picks];
   if (sort === "confidence") out.sort((a, b) => (b.confidence ?? -1) - (a.confidence ?? -1));
@@ -181,10 +228,12 @@ export default function Dashboard() {
   const [sort, setSort] = useState<Sort>("kickoff");
   const me = useMe();
   const qc = useQueryClient();
-  const q = useQuery({ ...picksQuery(day), placeholderData: keepPreviousData });
+  // today's list refreshes each minute so scores and phases stay current while the page is open
+  const q = useQuery({ ...picksQuery(day), placeholderData: keepPreviousData,
+                       refetchInterval: day === isoDate() ? 60_000 : false });
 
   const [view, setView] = useView();
-  const [now] = useState(() => Date.now());
+  const now = useNow(30_000);
 
   // warm the neighbouring days so the arrows feel instant
   useEffect(() => {
@@ -200,12 +249,14 @@ export default function Dashboard() {
     () => [...new Set((data?.picks ?? []).map((p) => p.league_code))].sort((a, b) => leagueName(a).localeCompare(leagueName(b))),
     [data],
   );
-  const filtered = useMemo(() => {
+  const parts = useMemo(() => {
     const all = (data?.picks ?? []).filter((p) => league === "all" || p.league_code === league);
-    return sortPicks(all, sort);
-  }, [data, league, sort]);
+    return split(sortPicks(all, sort), now);
+  }, [data, league, sort, now]);
+  const filtered = parts.upcoming;
   const open = filtered.filter((p) => !p.locked);
   const locked = filtered.filter((p) => p.locked);
+  const allParts = useMemo(() => split(data?.picks ?? [], now), [data, now]);
   const fullDate = new Intl.DateTimeFormat(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "UTC" })
     .format(dayDate(day));
   const updating = q.isFetching && q.isPlaceholderData;
@@ -237,8 +288,11 @@ export default function Dashboard() {
           </EmptyState>
         ) : (
           <div className={cn("space-y-6 transition-opacity", updating && "opacity-60")}>
-            <Summary data={data} day={day} now={now} />
-            {data.hidden_count > 0 ? <UpgradeStrip data={data} entitlements={me.data?.entitlements} /> : null}
+            <Summary data={data} day={day} parts={allParts} />
+            {data.hidden_count > 0 && allParts.upcoming.length > 0 ? (
+              <UpgradeStrip data={data} entitlements={me.data?.entitlements} />
+            ) : null}
+            {parts.live.length > 0 ? <LiveStrip picks={parts.live} now={now} day={day} /> : null}
 
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
               <div className="flex flex-wrap items-center gap-2">
@@ -260,17 +314,17 @@ export default function Dashboard() {
               ]} />
             </div>
 
-            {view === "table" ? (
-              <PicksTable picks={filtered} showValue={showValue} day={day} />
+            {filtered.length === 0 ? null : view === "table" ? (
+              <PicksTable picks={filtered} showValue={showValue} day={day} now={now} />
             ) : (
               <>
                 {open.length > 0 ? (
                   <section className="space-y-3" aria-labelledby="open-picks">
                     <h2 id="open-picks" className="text-sm font-semibold">
-                      Your picks <span className="num font-normal text-muted">{open.length}</span>
+                      Still to play <span className="num font-normal text-muted">{open.length}</span>
                     </h2>
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      {open.map((p) => <PickCard key={p.prediction_id} pick={p} showValue={showValue} day={day} />)}
+                      {open.map((p) => <PickCard key={p.prediction_id} pick={p} showValue={showValue} day={day} now={now} />)}
                     </div>
                   </section>
                 ) : null}
@@ -282,11 +336,16 @@ export default function Dashboard() {
                     <LockedList picks={locked} day={day} />
                   </section>
                 ) : null}
-                {filtered.length === 0 ? (
-                  <Card className="text-sm text-muted">No picks in this league for the day.</Card>
-                ) : null}
               </>
             )}
+            {filtered.length === 0 ? (
+              <Card className="text-sm text-muted">
+                {parts.live.length + parts.done.length > 0
+                  ? "Every match on this day has kicked off. Nothing left to play."
+                  : "No picks in this league for the day."}
+              </Card>
+            ) : null}
+            {parts.done.length > 0 ? <FinishedNote count={parts.done.length} day={day} /> : null}
             <Disclaimer text={data.disclaimer} />
           </div>
         )

@@ -15,9 +15,11 @@ export const nav = [
 
 export const appNav = [
   { href: "/dashboard", label: "Today" },
+  { href: "/live", label: "Live" },
   { href: "/top-picks", label: "Top 10" },
   { href: "/slip-builder", label: "Slip builder" },
   { href: "/jackpot", label: "Weekly jackpot" },
+  { href: "/history", label: "History" },
 ] as const;
 
 /** Signed-in user menu (Account lives here rather than among the prediction tabs). */

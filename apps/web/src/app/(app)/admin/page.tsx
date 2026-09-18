@@ -9,7 +9,7 @@ import { Alert, Badge, Button, Card, EmptyState, Field, Input, PageHeader, Selec
 import { api } from "@/lib/api";
 import { cn } from "@/lib/format";
 import { useMe } from "@/lib/hooks";
-import { AccessToken, AccessTokenCreated, Message } from "@/lib/schemas";
+import { AccessToken, AccessTokenCreated, LiveAdmin, type LiveAdminMatch, Message } from "@/lib/schemas";
 
 const Tokens = z.array(AccessToken);
 const statusStyle: Record<AccessToken["status"], string> = {
@@ -198,6 +198,128 @@ function FragmentRow({ t, expanded, onToggle, onRevoke }: {
   );
 }
 
+const shortWhen = (iso: string) =>
+  new Intl.DateTimeFormat(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
+
+function LinkRow({ m, onDone }: { m: LiveAdminMatch; onDone: (msg: string, ok: boolean) => void }) {
+  const [choice, setChoice] = useState(m.fixture_id != null ? String(m.fixture_id) : "");
+  const [busy, setBusy] = useState(false);
+  async function save(fixtureId: number | null) {
+    setBusy(true);
+    try {
+      const res = await api("/admin/livescores/link", Message, { method: "POST", json: { match_key: m.match_key, fixture_id: fixtureId } });
+      onDone(res.message, true);
+    } catch (err) {
+      onDone(err instanceof Error ? err.message : "Could not save the link", false);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <li className="grid gap-3 bg-surface px-4 py-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_auto] md:items-center">
+      <div className="min-w-0">
+        <p className="truncate text-sm font-medium">{m.home_team} <span className="text-muted">v</span> {m.away_team}</p>
+        <p className="text-xs text-muted">{shortWhen(m.kickoff_at)} · {m.league_code}</p>
+      </div>
+      <Select aria-label={`Feed fixture for ${m.home_team} v ${m.away_team}`} className="w-full py-2 text-sm" value={choice}
+              onChange={(e) => setChoice(e.target.value)} disabled={m.candidates.length === 0}>
+        <option value="">{m.candidates.length ? "Choose the same match in the feed…" : "No feed fixture at this kick-off"}</option>
+        {m.candidates.map((c) => (
+          <option key={c.id} value={c.id}>{c.home} v {c.away} · {c.league}, {c.country} · {shortWhen(c.kickoff_at)}</option>
+        ))}
+      </Select>
+      <div className="flex gap-2">
+        <Button className="px-3 py-2 text-xs" disabled={busy || !choice || Number(choice) === m.fixture_id}
+                onClick={() => save(Number(choice))}>
+          {m.fixture_id != null ? "Confirm" : "Link"}
+        </Button>
+        {m.fixture_id != null ? (
+          <Button variant="secondary" className="px-3 py-2 text-xs" disabled={busy} onClick={() => save(null)}>Unlink</Button>
+        ) : null}
+      </div>
+    </li>
+  );
+}
+
+function LiveScores() {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["admin", "livescores"], queryFn: () => api("/admin/livescores", LiveAdmin), refetchInterval: 60_000 });
+  const [msg, setMsg] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const refresh = () => qc.invalidateQueries({ queryKey: ["admin", "livescores"] });
+  const done = (text: string, ok: boolean) => { setMsg({ tone: ok ? "success" : "error", text }); if (ok) void refresh(); };
+
+  async function sync() {
+    setSyncing(true);
+    try {
+      done((await api("/admin/livescores/sync", Message, { method: "POST" })).message, true);
+    } catch (err) {
+      done(err instanceof Error ? err.message : "Sync failed", false);
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  if (q.isLoading) return <Skeleton className="h-32 w-full" />;
+  if (q.error || !q.data) return <Alert tone="error">{q.error?.message ?? "Could not load the live-score status"}</Alert>;
+  const d = q.data;
+  if (!d.configured) {
+    return (
+      <Alert tone="warn">
+        No live-score feed is configured. Matches still move to Live at kick-off and to History afterwards, without scores.
+        Set <code>API_FOOTBALL_KEY</code> on the Railway api and worker services to switch live scores on.
+      </Alert>
+    );
+  }
+  const cells = [
+    { label: "Requests left today", value: `${d.calls_left} / ${d.budget}` },
+    { label: "Provider says left", value: d.provider_remaining ?? "n/a" },
+    { label: "Poll interval", value: d.poll_interval_seconds ? `${Math.round(Number(d.poll_interval_seconds) / 60 * 10) / 10} min` : "idle" },
+    { label: "Last poll", value: d.last_poll ? shortWhen(d.last_poll) : "never" },
+    { label: "Matches linked", value: `${d.linked} / ${d.tracked}` },
+  ];
+  return (
+    <div className="space-y-4">
+      <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-card border border-border bg-border sm:grid-cols-5">
+        {cells.map((c) => (
+          <div key={c.label} className="bg-surface px-4 py-3 last:col-span-2 sm:last:col-span-1">
+            <dt className="text-xs text-muted">{c.label}</dt>
+            <dd className="num mt-1 text-lg font-semibold">{c.value}</dd>
+          </div>
+        ))}
+      </dl>
+      {d.paused || d.last_error ? (
+        <Alert tone={d.paused ? "error" : "warn"}>
+          {d.paused ? "Feed paused for up to an hour after a provider error. " : ""}Last error: {d.last_error ?? "n/a"}
+        </Alert>
+      ) : null}
+      {msg ? <Alert tone={msg.tone}>{msg.text}</Alert> : null}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-muted">
+          Matches are linked automatically when both team names agree. Pick the rest by hand; the names are remembered.
+        </p>
+        <Button variant="secondary" disabled={syncing} onClick={sync}>{syncing ? "Fetching…" : "Fetch fixture lists now"}</Button>
+      </div>
+      {d.unmatched.length ? (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold">Needs a match <span className="num font-normal text-muted">{d.unmatched.length}</span></h3>
+          <ul className="divide-y divide-border overflow-hidden rounded-card border border-border">
+            {d.unmatched.map((m) => <LinkRow key={m.match_key} m={m} onDone={done} />)}
+          </ul>
+        </div>
+      ) : <p className="text-sm text-muted">Every tracked match is linked.</p>}
+      {d.to_review.length ? (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold">Linked on one team name, please check <span className="num font-normal text-muted">{d.to_review.length}</span></h3>
+          <ul className="divide-y divide-border overflow-hidden rounded-card border border-border">
+            {d.to_review.map((m) => <LinkRow key={m.match_key} m={m} onDone={done} />)}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function Roles() {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<"admin" | "user">("admin");
@@ -286,6 +408,14 @@ export default function Admin() {
         {q.error ? <Alert tone="error">{q.error.message}</Alert> : null}
         {q.data && q.data.length === 0 ? <EmptyState title="No tokens yet">Tokens you create appear here.</EmptyState> : null}
         {q.data && q.data.length > 0 ? <TokenTable tokens={q.data} onRevoke={revoke} /> : null}
+      </section>
+
+      <section className="space-y-3" aria-labelledby="live-title">
+        <div>
+          <h2 id="live-title" className="font-semibold">Live scores</h2>
+          <p className="text-sm text-muted">Feed health, today&apos;s request budget, and matches the feed could not match on its own.</p>
+        </div>
+        <LiveScores />
       </section>
 
       <section className="space-y-3" aria-labelledby="roles-title">

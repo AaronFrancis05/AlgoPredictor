@@ -12,7 +12,7 @@ from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.db.session import get_sessionmaker
 from app.models import WebhookEvent
-from app.services import billing, picks_service, users
+from app.services import billing, livescores, picks_service, users
 
 log = get_logger("worker")
 
@@ -39,6 +39,15 @@ async def warm_cache(ctx) -> None:
         await picks_service.track_record(db)
 
 
+async def livescore_tick(ctx) -> None:
+    """Link published matches to the live-score feed and refresh scores while they are in play.
+    No-op (and no provider requests) without API_FOOTBALL_KEY or without matches around now."""
+    if not get_settings().api_football_key.get_secret_value():
+        return
+    async with get_sessionmaker()() as db:
+        await livescores.tick(db)
+
+
 async def purge_closed_accounts(ctx) -> int:
     """Erase accounts whose retention period after closure has ended."""
     async with get_sessionmaker()() as db:
@@ -62,8 +71,10 @@ class WorkerSettings:
     # Nothing enqueues ad-hoc jobs (only the crons below), so polling slowly loses nothing; each poll is one
     # billed Redis command on Upstash. Crons fire at most poll_delay seconds late.
     poll_delay = get_settings().worker_poll_delay_seconds
-    functions = [retry_failed_webhooks, warm_cache, purge_closed_accounts]
+    functions = [retry_failed_webhooks, warm_cache, purge_closed_accounts, livescore_tick]
     cron_jobs = [cron(retry_failed_webhooks, minute=set(range(0, 60, 5))),
                  cron(warm_cache, minute=set(range(0, 60, 10))),
+                 # every minute; livescores.poll stretches the real interval to fit the daily request budget
+                 cron(livescore_tick, minute=set(range(60)), timeout=50, unique=True),
                  cron(purge_closed_accounts, hour={3}, minute={17})]
     on_startup = startup

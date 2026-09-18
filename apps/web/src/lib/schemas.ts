@@ -6,6 +6,19 @@ import { z } from "zod";
 
 export const PickSide = z.enum(["home", "draw", "away"]);
 
+export const MatchPhase = z.enum(["upcoming", "live", "finished", "awaiting_result", "postponed", "cancelled", "abandoned"]);
+export type MatchPhase = z.infer<typeof MatchPhase>;
+
+/** Score and status from the live-score feed (display only; the official result comes from grading). */
+export const LiveScore = z.object({
+  status: z.string(),
+  elapsed: z.number().nullable(),
+  home_goals: z.number().nullable(),
+  away_goals: z.number().nullable(),
+  updated_at: z.string().nullable(),
+});
+export type LiveScore = z.infer<typeof LiveScore>;
+
 export const Pick = z.object({
   prediction_id: z.string(),
   kickoff_date: z.string(),
@@ -30,8 +43,68 @@ export const Pick = z.object({
   model_version: z.string(),
   result: PickSide.nullable().optional(),
   correct: z.boolean().nullable().optional(),
+  // defaults keep the site working against an API deployed before these fields existed
+  phase: MatchPhase.optional().default("upcoming"),
+  live: LiveScore.nullable().optional().default(null),
+  outcome: z.enum(["won", "lost"]).nullable().optional().default(null),
+  outcome_official: z.boolean().optional().default(false),
 });
 export type Pick = z.infer<typeof Pick>;
+
+export const LivePicks = z.object({
+  plan: z.string(),
+  picks: z.array(Pick),
+  feed: z.boolean(),
+  disclaimer: z.string(),
+});
+export type LivePicks = z.infer<typeof LivePicks>;
+
+export const History = z.object({
+  date_from: z.string(),
+  date_to: z.string(),
+  page: z.number(),
+  page_size: z.number(),
+  total: z.number(),
+  summary: z.object({
+    matches: z.number(), won: z.number(), lost: z.number(), pending: z.number(), void: z.number(),
+    hit_rate: z.number().nullable(), provisional: z.number(),
+  }),
+  by_tier: z.array(z.object({ tier: z.string(), settled: z.number(), won: z.number(), hit_rate: z.number().nullable() })),
+  leagues: z.array(z.string()),
+  picks: z.array(Pick),
+  disclaimer: z.string(),
+});
+export type History = z.infer<typeof History>;
+
+export const LiveAdminMatch = z.object({
+  match_key: z.string(),
+  kickoff_at: z.string(),
+  league_code: z.string(),
+  home_team: z.string(),
+  away_team: z.string(),
+  fixture_id: z.number().nullable(),
+  link_method: z.string(),
+  status: z.string(),
+  candidates: z.array(z.object({ id: z.number(), home: z.string(), away: z.string(), league: z.string(),
+                                 country: z.string(), kickoff_at: z.string() })),
+});
+export type LiveAdminMatch = z.infer<typeof LiveAdminMatch>;
+
+export const LiveAdmin = z.object({
+  configured: z.boolean(),
+  budget: z.number(),
+  calls_left: z.number(),
+  provider_remaining: z.string().nullable(),
+  last_poll: z.string().nullable(),
+  poll_interval_seconds: z.string().nullable(),
+  last_error: z.string().nullable(),
+  paused: z.boolean(),
+  tracked: z.number(),
+  linked: z.number(),
+  unmatched: z.array(LiveAdminMatch),
+  to_review: z.array(LiveAdminMatch),
+});
+export type LiveAdmin = z.infer<typeof LiveAdmin>;
 
 export const PicksDay = z.object({
   date: z.string(),

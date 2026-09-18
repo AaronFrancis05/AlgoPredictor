@@ -1,6 +1,7 @@
 import Link from "next/link";
 
-import { ButtonLink, Container } from "@/components/ui";
+import { HeaderActions } from "@/components/session-actions";
+import { Container } from "@/components/ui";
 import { nav, site } from "@/lib/site";
 
 export function Logo() {
@@ -24,12 +25,7 @@ export function SiteHeader() {
             </Link>
           ))}
         </nav>
-        <div className="flex items-center gap-2">
-          <ButtonLink href="/login" variant="ghost">
-            Sign in
-          </ButtonLink>
-          <ButtonLink href="/register">Start free</ButtonLink>
-        </div>
+        <HeaderActions />
       </Container>
     </header>
   );
