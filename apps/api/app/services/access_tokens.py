@@ -12,10 +12,13 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.cache import invalidate
+from app.core.logging import get_logger
 from app.core.security import token_digest
 from app.models import ROLES, AccessToken, Plan, Subscription, User
 from app.services.entitlements import active_plan, forget_user_plans
 
+log = get_logger(__name__)
 PROVIDER = "access_token"
 # Crockford-style alphabet without I, L, O, U: easy to read aloud and type from a message
 _ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
@@ -136,5 +139,8 @@ async def set_role(db: AsyncSession, email: str, role: str) -> User:
 
 
 async def after_change() -> None:
-    """Plans derived from tokens or roles changed: drop cached plans so it shows at once."""
+    """Plans derived from tokens or roles changed: drop cached plans (and viewers, which carry the role) so it
+    shows at once. Raises if the viewer cache cannot be invalidated, so a role change is not reported as done
+    while other instances may still serve the old role (local copies are dropped regardless)."""
     await forget_user_plans()
+    await invalidate("viewer")

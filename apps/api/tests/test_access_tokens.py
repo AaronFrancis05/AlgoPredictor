@@ -5,7 +5,7 @@ from app.core.redis import get_redis
 from app.db.session import get_sessionmaker
 from app.models import AccessToken
 from app.services import access_tokens
-from tests.helpers import give_plan, login, register_verified
+from tests.helpers import enable_mfa, give_plan, login, register_verified, reset_rate_limits
 
 
 def _csrf(client) -> dict:
@@ -25,6 +25,8 @@ async def _make_admin(client) -> str:
         await db.commit()
     await access_tokens.after_change()
     await login(client, email)
+    await enable_mfa(client)  # admin endpoints need a two-factor session
+    await reset_rate_limits()  # enrolment used two auth-limited calls; keep caches intact
     return email
 
 

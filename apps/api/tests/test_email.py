@@ -55,6 +55,40 @@ async def test_resend_error_is_logged_not_raised(resend):
     assert len(sent) == 1
 
 
+# ------------------------------------------------------------------ quota / abuse guards
+async def test_one_inbox_gets_at_most_three_links_an_hour():
+    for i in range(5):
+        await mail.send_password_reset("victim@example.com", f"tok{i}")
+    assert len(mail.OUTBOX) == 3
+    await mail.send_verification("victim@example.com", "v1")  # counted per purpose
+    assert len(mail.OUTBOX) == 4
+
+
+async def test_daily_budget_stops_all_automatic_email(monkeypatch):
+    monkeypatch.setattr(get_settings(), "email_daily_budget", 2)
+    for i in range(4):
+        await mail.send_verification(f"new-{i}@example.com", "tok")
+    assert len(mail.OUTBOX) == 2
+
+
+async def test_skipped_email_does_not_change_the_reply(client):
+    from tests.helpers import register_verified
+    email = await register_verified(client)
+    mail.OUTBOX.clear()
+    replies = {(await client.post("/api/v1/auth/password/forgot", json={"email": email})).text for _ in range(5)}
+    assert len(replies) == 1 and len(mail.OUTBOX) == 3  # same answer whether or not mail went out
+
+
+def test_email_endpoints_have_an_hourly_ip_limit():
+    from app.core.config import Settings
+    from app.routers import auth as auth_router
+    assert Settings.model_fields["rate_limit_email"].default == "10/3600"  # conftest raises it for other tests
+    paths = {"/auth/register", "/auth/resend-verification", "/auth/password/forgot"}
+    for route in auth_router.router.routes:
+        if route.path in paths:
+            assert any(d.dependency is auth_router.email_limit for d in route.dependencies), route.path
+
+
 async def test_register_still_succeeds_when_resend_fails(client, resend):
     _, status = resend
     status["code"] = 500

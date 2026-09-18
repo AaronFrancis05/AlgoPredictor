@@ -17,10 +17,10 @@ export default function OpenGraphImage() {
           {site.name}
         </div>
         <div style={{ marginTop: 40, fontSize: 64, fontWeight: 800, lineHeight: 1.1 }}>
-          Football predictions with the probability behind every pick.
+          Know what to back before kick-off.
         </div>
         <div style={{ marginTop: 30, fontSize: 30, color: "#93a1b5" }}>
-          Tested on 38,732 matches · public track record · 18+
+          Today&apos;s strongest picks · slips at your odds · every result public · 18+
         </div>
       </div>
     ),

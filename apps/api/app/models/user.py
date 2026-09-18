@@ -1,7 +1,19 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, Uuid, text
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    Uuid,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -32,10 +44,20 @@ class User(UUIDPk, Timestamps, Base):
     # (ACCOUNT_RETENTION_DAYS later) by the worker. Payment and audit rows outlive it without the link.
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     purge_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Two-factor sign-in (TOTP). The secret is Fernet-encrypted; it is pending until totp_enabled_at is set.
+    # totp_last_step makes every code single-use; recovery codes are stored as SHA-256 digests.
+    totp_secret_enc: Mapped[str | None] = mapped_column(String(255))
+    totp_enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    totp_last_step: Mapped[int | None] = mapped_column(BigInteger)
+    mfa_recovery_digests: Mapped[list | None] = mapped_column(JSON)
 
     @property
     def is_admin(self) -> bool:
         return self.role == ROLE_ADMIN
+
+    @property
+    def mfa_enabled(self) -> bool:
+        return self.totp_enabled_at is not None
 
 
 class OAuthAccount(UUIDPk, Base):
@@ -60,6 +82,8 @@ class RefreshToken(UUIDPk, Base):
     rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     user_agent: Mapped[str] = mapped_column(String(200), default="")
     ip: Mapped[str] = mapped_column(String(64), default="")
+    # the session was started with a second factor; carried through every rotation of the family
+    mfa: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

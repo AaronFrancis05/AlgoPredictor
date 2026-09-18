@@ -1,12 +1,13 @@
 """Two-level cache-aside: a small in-process layer (L1) in front of Redis (L2).
 
-Redis keys are versioned by a 'generation' counter per namespace, so one INCR invalidates every cached entry of
-that namespace (used after each ingest). L1 keeps hot entries for a few seconds so a busy endpoint does not pay
+Redis keys are versioned by a random 'generation' token per namespace, so one SET invalidates every cached entry
+of that namespace (used after each ingest). L1 keeps hot entries for a few seconds so a busy endpoint does not pay
 two Redis round trips per request; other API instances can therefore serve an entry up to L1_TTL_SECONDS after
 it was invalidated. A cache failure never breaks the request: it falls through to the producer.
 """
 import json
 import time
+import uuid
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -47,10 +48,23 @@ def _l1_drop(prefix: str) -> None:
 
 def clear_local() -> None:
     _l1.clear()
+    _gen_l1.clear()
+
+
+_gen_l1: dict[str, tuple[float, str]] = {}
+# bumped by forget()/invalidate(); a read that started under an older epoch must not store what it fetched
+_epoch: dict[str, int] = {}
 
 
 async def _generation(namespace: str) -> str:
-    return await get_redis().get(f"cachegen:{namespace}") or "0"
+    """The namespace's generation, remembered locally for L1_TTL_SECONDS: an L1 miss then costs one Redis GET
+    instead of two. Another instance's invalidate() reaches this one within the same bound as L1 itself."""
+    hit = _gen_l1.get(namespace)
+    if hit is not None and hit[0] >= time.monotonic():
+        return hit[1]
+    gen = await get_redis().get(f"cachegen:{namespace}") or "0"
+    _gen_l1[namespace] = (time.monotonic() + L1_TTL_SECONDS, gen)
+    return gen
 
 
 async def cached(namespace: str, key: str, ttl: int, producer: Callable[[], Awaitable[Any]]) -> Any:
@@ -58,6 +72,11 @@ async def cached(namespace: str, key: str, ttl: int, producer: Callable[[], Awai
     found, value = _l1_get(local_key)
     if found:
         return value
+    epoch = _epoch.get(namespace, 0)
+
+    def current() -> bool:  # checked right before each store: no await between it and the write
+        return _epoch.get(namespace, 0) == epoch
+
     redis = get_redis()
     full = None
     try:
@@ -65,13 +84,16 @@ async def cached(namespace: str, key: str, ttl: int, producer: Callable[[], Awai
         hit = await redis.get(full)
         if hit is not None:
             value = json.loads(hit)
-            _l1_set(local_key, value, ttl)
+            if current():
+                _l1_set(local_key, value, ttl)
             return value
     except Exception as e:  # cache failures must never break the request
         log.warning("cache_get_failed", error=str(e))
     value = await producer()
     # round-trip through JSON so L1 and Redis hand callers the same shapes (dates as strings)
     value = json.loads(json.dumps(value, default=str))
+    if not current():  # invalidated while we were reading: serve it once, cache nothing
+        return value
     _l1_set(local_key, value, ttl)
     if full is not None:
         try:
@@ -81,15 +103,32 @@ async def cached(namespace: str, key: str, ttl: int, producer: Callable[[], Awai
     return value
 
 
-async def forget(namespace: str, key: str) -> None:
-    """Drop one entry (e.g. a user's plan after a payment)."""
+def _bump(namespace: str) -> None:
+    _epoch[namespace] = _epoch.get(namespace, 0) + 1
+
+
+async def forget(namespace: str, key: str, *, strict: bool = False) -> None:
+    """Drop one entry (e.g. a user's plan after a payment). strict=True raises when Redis cannot be reached."""
+    _bump(namespace)
     _l1.pop(f"{namespace}:{key}", None)
     try:
         await get_redis().delete(f"cache:{namespace}:{await _generation(namespace)}:{key}")
     except Exception as e:
         log.warning("cache_forget_failed", error=str(e))
+        if strict:
+            raise
+    finally:  # again after the await, in case a read stored it meanwhile or is still in flight
+        _bump(namespace)
+        _l1.pop(f"{namespace}:{key}", None)
 
 
 async def invalidate(namespace: str) -> None:
-    _l1_drop(f"{namespace}:")
-    await get_redis().incr(f"cachegen:{namespace}")
+    _bump(namespace)
+    try:
+        # a fresh random generation, not INCR: a counter restarts after Redis loses its keys (eviction, restart)
+        # and could land on a generation that a stale read has just repopulated
+        await get_redis().set(f"cachegen:{namespace}", uuid.uuid4().hex)
+    finally:  # drop local copies after the bump, so a concurrent request cannot re-cache the old generation
+        _bump(namespace)
+        _l1_drop(f"{namespace}:")
+        _gen_l1.pop(namespace, None)

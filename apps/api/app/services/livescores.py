@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache import cached, invalidate
 from app.core.config import get_settings
+from app.core.events import publish
 from app.core.logging import get_logger
 from app.core.redis import get_redis
 from app.models import LiveMatch, LiveTeamAlias, Pick
@@ -314,6 +315,7 @@ async def link_matches(db: AsyncSession, now: datetime, force: bool = False) -> 
     await db.commit()
     if made:
         await invalidate(CACHE_NS)
+        await publish("live")
         log.info("livescore_linked", count=made)
     return made
 
@@ -388,7 +390,20 @@ async def poll(db: AsyncSession, now: datetime) -> int:
     await db.commit()
     if changed:
         await invalidate(CACHE_NS)
+        await publish("live")  # open pages show the new score at once
     return changed
+
+
+async def next_update_at(now: datetime) -> datetime | None:
+    """When the worker's next score poll is due: last poll + current interval, at least a minute ahead (the tick
+    runs each minute). None when nothing has been polled today or the feed is paused."""
+    last, interval, paused = await get_redis().mget("livescore:last_poll", "livescore:interval", "livescore:paused")
+    if paused or not last or not interval:
+        return None
+    due = datetime.fromisoformat(last) + timedelta(seconds=float(interval))
+    if due < now - timedelta(minutes=10):  # stale: polling has stopped (no matches in play)
+        return None
+    return max(due, now + timedelta(seconds=60)).replace(microsecond=0)
 
 
 async def tick(db: AsyncSession, now: datetime | None = None) -> None:
@@ -445,4 +460,5 @@ async def admin_link(db: AsyncSession, key: str, fixture_id: int | None, now: da
                 await db.merge(LiveTeamAlias(provider=PROVIDER, provider_name=n, team=team))
     await db.commit()
     await invalidate(CACHE_NS)
+    await publish("live")
     return m

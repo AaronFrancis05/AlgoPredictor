@@ -1,30 +1,27 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { useMemo } from "react";
 
+import { NotifyToggle } from "@/components/notify-toggle";
 import { Disclaimer, LiveDot, MatchList } from "@/components/picks";
 import { EmptyState, PageHeader, Skeleton } from "@/components/ui";
 import { ErrorPanel } from "@/components/upgrade";
-import { api } from "@/lib/api";
-import { useNow } from "@/lib/hooks";
+import { useFollows } from "@/lib/follows";
+import { useLive, useNow } from "@/lib/hooks";
 import { phaseAt } from "@/lib/match";
-import { LivePicks } from "@/lib/schemas";
 
-const REFRESH_MS = 30_000;
+const timeFmt = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
 
 export default function LivePage() {
   const now = useNow(15_000);
-  const q = useQuery({
-    queryKey: ["live"],
-    queryFn: () => api("/picks/live", LivePicks),
-    refetchInterval: REFRESH_MS,
-    refetchIntervalInBackground: false,
-  });
+  const q = useLive();
   // a match can reach full time between refreshes: keep only what is still in play by the viewer's clock too
   const live = useMemo(() => (q.data?.picks ?? []).filter((p) => phaseAt(p, now) === "live"), [q.data, now]);
+  const follows = useFollows();
+  const mine = follows ? live.filter(follows.isFollowed) : [];
+  const others = follows ? live.filter((p) => !follows.isFollowed(p)) : live;
   const updated = q.dataUpdatedAt
     ? new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(q.dataUpdatedAt)
     : null;
@@ -35,10 +32,14 @@ export default function LivePage() {
         title="Live"
         subtitle="Matches with a published pick that are in play now. Finished matches move to History."
         action={updated ? (
-          <p className="inline-flex items-center gap-1.5 text-xs text-muted" role="status" aria-live="polite">
-            <RefreshCw className={q.isFetching ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} aria-hidden />
-            Updated {updated} · refreshes every 30 s
-          </p>
+          <div className="flex flex-col items-end gap-2">
+            <NotifyToggle />
+            <p className="inline-flex items-center gap-1.5 text-xs text-muted" role="status" aria-live="polite">
+              <RefreshCw className={q.isFetching ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} aria-hidden />
+              Updated {updated}
+              {q.data?.next_update_at ? <> · next update about {timeFmt.format(Date.parse(q.data.next_update_at))}</> : null}
+            </p>
+          </div>
         ) : null}
       />
       {q.isLoading ? (
@@ -61,12 +62,25 @@ export default function LivePage() {
               results are in <Link className="underline" href="/history">History</Link>.
             </EmptyState>
           ) : (
-            <section className="space-y-3" aria-labelledby="in-play">
-              <h2 id="in-play" className="flex items-center gap-2 text-sm font-semibold">
-                <LiveDot /> In play <span className="num font-normal text-muted">{live.length}</span>
-              </h2>
-              <MatchList picks={live} now={now} />
-            </section>
+            <>
+              {mine.length > 0 ? (
+                <section className="space-y-3" aria-labelledby="following">
+                  <h2 id="following" className="flex items-center gap-2 text-sm font-semibold">
+                    <LiveDot /> Your matches <span className="num font-normal text-muted">{mine.length}</span>
+                  </h2>
+                  <MatchList picks={mine} now={now} />
+                </section>
+              ) : null}
+              {others.length > 0 ? (
+                <section className="space-y-3" aria-labelledby="in-play">
+                  <h2 id="in-play" className="flex items-center gap-2 text-sm font-semibold">
+                    <LiveDot /> {mine.length > 0 ? "Other matches in play" : "In play"}{" "}
+                    <span className="num font-normal text-muted">{others.length}</span>
+                  </h2>
+                  <MatchList picks={others} now={now} />
+                </section>
+              ) : null}
+            </>
           )}
           <p className="text-xs text-muted">
             Live scores are for information and can lag the match by a minute or two. A pick counts as won or lost only

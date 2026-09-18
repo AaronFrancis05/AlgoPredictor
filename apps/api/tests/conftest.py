@@ -10,10 +10,12 @@ os.environ.update({
     "RATE_LIMIT_AUTH": "8/60",
     "RATE_LIMIT_DEFAULT": "1000/60",
     "RATE_LIMIT_PRODUCTS": "1000/60",
+    "RATE_LIMIT_EMAIL": "1000/3600",  # tests register many accounts; test_email_guards checks the real limits
     "INGEST_HMAC_SECRET": "test-ingest-secret",
     "STRIPE_WEBHOOK_SECRET": "whsec_test_secret",
     "FLUTTERWAVE_WEBHOOK_HASH": "flw-test-hash",
     "JWT_SECRET": "test-jwt-secret-that-is-long-enough-123456",
+    "MFA_ENCRYPTION_KEY": "MzGsE07kTM4wxxhb4krDiOF4wtg-yOmAC10KJDbRHj4=",  # test-only Fernet key
 })
 
 import pytest  # noqa: E402

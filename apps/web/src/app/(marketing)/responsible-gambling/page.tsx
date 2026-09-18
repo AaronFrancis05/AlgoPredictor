@@ -4,7 +4,7 @@ import { Card, Container, PageHeader } from "@/components/ui";
 
 export const metadata: Metadata = {
   title: "Responsible gambling",
-  description: "Keep betting safe: AlgoPredict is 18+ only, never guarantees results, and points you to free, confidential help.",
+  description: "Bet within your limits. AlgoPredict is 18+ only, no pick is ever certain, and free, confidential help is one click away.",
   alternates: { canonical: "/responsible-gambling" },
 };
 

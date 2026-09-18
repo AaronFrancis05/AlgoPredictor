@@ -1,7 +1,8 @@
 """FastAPI application factory."""
+import hmac
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -12,12 +13,13 @@ from app.core.logging import configure_logging
 from app.core.middleware import (
     BodySizeLimitMiddleware,
     CSRFMiddleware,
+    ETagMiddleware,
     RequestContextMiddleware,
     SecurityHeadersMiddleware,
 )
 from app.core.ratelimit import rate_limit
 from app.db.session import dispose_engine
-from app.routers import admin, auth, billing, health, internal, picks, users
+from app.routers import admin, auth, billing, events, health, internal, picks, users
 
 
 @asynccontextmanager
@@ -45,20 +47,31 @@ def create_app() -> FastAPI:
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=s.trusted_hosts)
     app.add_middleware(SecurityHeadersMiddleware, hsts=s.is_production)
     app.add_middleware(RequestContextMiddleware)
+    # polled pick lists rarely change: unchanged polls get 304 (inside GZip, so the tag hashes plain JSON)
+    app.add_middleware(ETagMiddleware, prefix=s.api_prefix)
     # pick lists are repetitive JSON: gzip cuts them several-fold for mobile connections
     app.add_middleware(GZipMiddleware, minimum_size=1024)
 
     default_limit = rate_limit("default", s.rate_limit_default)
-    from fastapi import Depends
     api_deps = [Depends(default_limit)]
-    for r in (auth.router, users.router, picks.router, billing.router, admin.router):
+    for r in (auth.router, users.router, picks.router, billing.router, admin.router, events.router):
         app.include_router(r, prefix=s.api_prefix, dependencies=api_deps)
     app.include_router(billing.webhooks)
     app.include_router(internal.router)
     app.include_router(health.router)
-    Instrumentator(excluded_handlers=["/healthz", "/readyz", "/metrics"]).instrument(app).expose(
-        app, include_in_schema=False)
+    instrumentator = Instrumentator(excluded_handlers=["/healthz", "/readyz", "/metrics"]).instrument(app)
+    # /metrics lists every route (admin and internal ones too) with its traffic: only with METRICS_TOKEN set,
+    # and only for "Authorization: Bearer <METRICS_TOKEN>". Unset = no /metrics route at all.
+    if s.metrics_token.get_secret_value():
+        instrumentator.expose(app, include_in_schema=False, dependencies=[Depends(metrics_auth)])
     return app
+
+
+async def metrics_auth(request: Request) -> None:
+    expected = get_settings().metrics_token.get_secret_value()
+    given = request.headers.get("authorization", "")
+    if not expected or not hmac.compare_digest(given.encode(), f"Bearer {expected}".encode()):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")  # do not advertise that the route exists
 
 
 app = create_app()

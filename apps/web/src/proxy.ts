@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { visitorHeaders } from "@/lib/client-ip";
+
 /**
  * Runs before every page request (Next.js 16 "proxy", formerly middleware):
  * 1. a fresh CSP nonce per request (Next applies it to its own scripts/styles automatically);
@@ -10,29 +12,22 @@ import { NextResponse, type NextRequest } from "next/server";
 const APP_PREFIXES = ["/dashboard", "/live", "/history", "/top-picks", "/slip-builder", "/jackpot", "/account",
                       "/onboarding", "/admin"];
 
-/**
- * The visitor's IP as seen by the load balancer in front of this server. Each trusted hop appends the address it
- * received the request from, so the real client is `WEB_TRUSTED_PROXY_COUNT` entries from the right. Anything
- * further left was sent by the client and can be forged. Local `next start` has no load balancer: Next itself fills
- * X-Forwarded-For with the socket address when the header is missing (count 1 then reads that value).
- */
-function clientIp(request: NextRequest): string | null {
-  const hops = Number(process.env.WEB_TRUSTED_PROXY_COUNT ?? "1");
-  const parts = (request.headers.get("x-forwarded-for") ?? "").split(",").map((p) => p.trim()).filter(Boolean);
-  return hops > 0 && parts.length >= hops ? parts[parts.length - hops] : null;
-}
+/** Origin of the live-events stream when it is served straight from the API (see lib/live-events.ts). */
+const eventsOrigin = (() => {
+  try {
+    const url = process.env.NEXT_PUBLIC_EVENTS_URL;
+    return url && /^https?:\/\//.test(url) ? new URL(url).origin : null;
+  } catch {
+    return null;
+  }
+})();
 
 /** API calls are rewritten to FastAPI; tell it who the visitor is so its rate limits key on them, not on us. */
 function forwardToApi(request: NextRequest) {
   const headers = new Headers(request.headers);
   headers.delete("x-client-ip");
   headers.delete("x-proxy-secret");
-  const secret = process.env.PROXY_SHARED_SECRET;
-  const ip = clientIp(request);
-  if (secret && ip) {
-    headers.set("x-client-ip", ip);
-    headers.set("x-proxy-secret", secret);
-  }
+  for (const [k, v] of Object.entries(visitorHeaders(request.headers.get("x-forwarded-for")))) headers.set(k, v);
   return NextResponse.next({ request: { headers } });
 }
 
@@ -61,7 +56,7 @@ export function proxy(request: NextRequest) {
     "style-src-attr 'unsafe-inline'",
     "img-src 'self' blob: data:",
     "font-src 'self'",
-    "connect-src 'self'",
+    `connect-src 'self'${eventsOrigin ? ` ${eventsOrigin}` : ""}`,
     "object-src 'none'",
     "base-uri 'self'",
     // checkout pages of the payment providers are reached by redirect (not form posts), 'self' is enough

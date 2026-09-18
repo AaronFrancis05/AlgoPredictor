@@ -15,6 +15,7 @@ import { type Entitlements, Message } from "@/lib/schemas";
 import { site } from "@/lib/site";
 
 import { SignInMethods } from "./sign-in-methods";
+import { TwoFactor } from "./two-factor";
 
 const ApiKey = z.object({ api_key: z.string(), note: z.string() });
 
@@ -209,6 +210,11 @@ export default function Account() {
         <Suspense>
           <SignInMethods user={user} />
         </Suspense>
+      </Section>
+
+      <Section id="two-factor" title="Two-factor sign-in"
+               description="A code from your phone on top of your password or Google, so a stolen password alone cannot open the account.">
+        <TwoFactor user={user} />
       </Section>
 
       <Section id="api" title="API access" description={<>Read picks from your own tools. Send the key in the <code className="num">X-API-Key</code> header.</>}>

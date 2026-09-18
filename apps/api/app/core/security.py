@@ -30,10 +30,11 @@ def needs_rehash(password_hash: str) -> bool:
     return _hasher.check_needs_rehash(password_hash)
 
 
-def create_access_token(user_id: UUID, plan: str) -> str:
+def create_access_token(user_id: UUID, plan: str, mfa: bool = False) -> str:
+    """`mfa` records that this session was started with a second factor (required for admin endpoints)."""
     s = get_settings()
     now = datetime.now(UTC)
-    payload = {"sub": str(user_id), "plan": plan, "type": "access", "iat": now,
+    payload = {"sub": str(user_id), "plan": plan, "type": "access", "mfa": mfa, "iat": now,
                "exp": now + timedelta(minutes=s.access_token_minutes), "jti": secrets.token_hex(8)}
     return jwt.encode(payload, s.jwt_secret.get_secret_value(), algorithm=s.jwt_algorithm)
 

@@ -114,6 +114,8 @@ class UserOut(BaseModel):
     has_api_key: bool
     has_password: bool
     google_linked: bool
+    mfa_enabled: bool = False
+    mfa_session: bool = False            # this session was started with the second factor
     created_at: datetime | None = None
     account_retention_days: int
 
@@ -122,6 +124,36 @@ class AuthOut(BaseModel):
     user: UserOut
     csrf_token: str
     access_token_expires_in: int
+
+
+class MfaChallengeOut(BaseModel):
+    """Password (or Google) accepted; POST /auth/mfa/verify with the authenticator code to finish signing in."""
+    mfa_required: Literal[True] = True
+
+
+class MfaCodeIn(BaseModel):
+    code: str = Field(min_length=6, max_length=20)   # 6-digit TOTP, or a recovery code XXXXX-XXXXX
+
+
+class MfaEnableIn(MfaCodeIn):
+    current_password: str | None = Field(default=None, max_length=128)  # required when the account has a password
+
+
+class MfaSetupOut(BaseModel):
+    secret: str                      # base32, for typing into the app
+    otpauth_uri: str                 # for a QR code / tapping on the phone
+    note: str = "Add this to your authenticator app, then confirm with the 6-digit code it shows."
+
+
+class MfaRecoveryCodesOut(BaseModel):
+    recovery_codes: list[str]
+    note: str = ("Shown once. Each code works one time if you lose your phone. Store them somewhere safe, "
+                 "not on the same phone.")
+
+
+class FollowsOut(BaseModel):
+    matches: list[str]               # prediction_ids
+    leagues: list[str]               # league codes
 
 
 class ApiKeyOut(BaseModel):
@@ -189,6 +221,9 @@ class LivePicksOut(BaseModel):
     plan: str
     picks: list[PickOut]
     feed: bool                       # is a live-score feed configured
+    # when this list is next expected to change: the worker's next score poll or the next kick-off, whichever is
+    # first (None = nothing scheduled). Clients refetch then instead of on a fixed timer.
+    next_update_at: datetime | None = None
     disclaimer: str
 
 

@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import hashlib
+import hmac
 import json
 import secrets
 import uuid
@@ -18,11 +19,23 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.ratelimit import rate_limit
 from app.core.redis import get_redis
-from app.core.security import hash_password
+from app.core.security import hash_password, token_digest
 from app.db.session import get_db
-from app.deps import REFRESH_COOKIE, current_user
+from app.deps import REFRESH_COOKIE, current_user, forget_viewer
 from app.models import OAuthAccount, User
-from app.schemas import AgeConfirmIn, AuthOut, EmailIn, LoginIn, Message, PasswordResetIn, RegisterIn, TokenIn, UserOut
+from app.schemas import (
+    AgeConfirmIn,
+    AuthOut,
+    EmailIn,
+    LoginIn,
+    Message,
+    MfaChallengeOut,
+    MfaCodeIn,
+    PasswordResetIn,
+    RegisterIn,
+    TokenIn,
+    UserOut,
+)
 from app.services import auth_service as auth
 from app.services import email as mail
 from app.services.audit import audit
@@ -32,6 +45,9 @@ settings = get_settings()
 log = get_logger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
 auth_limit = rate_limit("auth", settings.rate_limit_auth, fail_closed=True)
+# endpoints that can send an email: an hourly cap per IP on top of auth_limit (provider quota, bounce rate)
+email_limit = rate_limit("email", settings.rate_limit_email, fail_closed=True)
+email_deps = [Depends(auth_limit), Depends(email_limit)]
 
 GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN = "https://oauth2.googleapis.com/token"  # noqa: S105 - endpoint URL, not a secret
@@ -41,12 +57,12 @@ _jwks_client: jwt.PyJWKClient | None = None
 GOOGLE_CLOCK_LEEWAY_SECONDS = 60
 
 
-async def _auth_out(db: AsyncSession, user: User, csrf: str) -> AuthOut:
-    return AuthOut(user=await user_out(db, user), csrf_token=csrf,
+async def _auth_out(db: AsyncSession, user: User, csrf: str, mfa_session: bool = False) -> AuthOut:
+    return AuthOut(user=await user_out(db, user, mfa_session=mfa_session), csrf_token=csrf,
                    access_token_expires_in=settings.access_token_minutes * 60)
 
 
-@router.post("/register", response_model=Message, status_code=201, dependencies=[Depends(auth_limit)])
+@router.post("/register", response_model=Message, status_code=201, dependencies=email_deps)
 async def register(body: RegisterIn, request: Request, db: AsyncSession = Depends(get_db)) -> Message:
     email = auth.normalise_email(body.email)
     generic = Message(message="If this address can be registered, a confirmation email is on its way.")
@@ -76,10 +92,11 @@ async def verify_email(body: TokenIn, request: Request, db: AsyncSession = Depen
     user.email_verified_at = user.email_verified_at or datetime.now(UTC)
     await audit(db, "email_verified", request, user.id)
     await db.commit()
+    await forget_viewer(user.id)
     return Message(message="Email confirmed. You can sign in now.")
 
 
-@router.post("/resend-verification", response_model=Message, dependencies=[Depends(auth_limit)])
+@router.post("/resend-verification", response_model=Message, dependencies=email_deps)
 async def resend_verification(body: EmailIn, db: AsyncSession = Depends(get_db)) -> Message:
     user = (await db.execute(select(User).where(User.email == auth.normalise_email(body.email)))).scalar_one_or_none()
     if user and user.email_verified_at is None:
@@ -89,17 +106,32 @@ async def resend_verification(body: EmailIn, db: AsyncSession = Depends(get_db))
     return Message(message="If the address needs confirming, a new email is on its way.")
 
 
-@router.post("/login", response_model=AuthOut, dependencies=[Depends(auth_limit)])
-async def login(body: LoginIn, request: Request, response: Response, db: AsyncSession = Depends(get_db)) -> AuthOut:
+@router.post("/login", response_model=AuthOut | MfaChallengeOut, dependencies=[Depends(auth_limit)])
+async def login(body: LoginIn, request: Request, response: Response,
+                db: AsyncSession = Depends(get_db)) -> AuthOut | MfaChallengeOut:
+    """With two-factor on, the password only opens a 5-minute challenge: finish with POST /auth/mfa/verify."""
     user = await auth.authenticate(db, request, body.email, body.password)
+    if user.mfa_enabled:
+        await auth.start_mfa_challenge(response, user, via="password")
+        await audit(db, "login_password_ok_mfa_pending", request, user.id)
+        await db.commit()
+        return MfaChallengeOut()
     csrf = await auth.issue_session(db, request, response, user)
     return await _auth_out(db, user, csrf)
 
 
+@router.post("/mfa/verify", response_model=AuthOut, dependencies=[Depends(auth_limit)])
+async def mfa_verify(body: MfaCodeIn, request: Request, response: Response,
+                     db: AsyncSession = Depends(get_db)) -> AuthOut:
+    """Second step of sign-in: the authenticator code (or a recovery code) for the pending challenge cookie."""
+    user, csrf = await auth.complete_mfa_challenge(db, request, response, body.code)
+    return await _auth_out(db, user, csrf, mfa_session=True)
+
+
 @router.post("/refresh", response_model=AuthOut)
 async def refresh(request: Request, response: Response, db: AsyncSession = Depends(get_db)) -> AuthOut:
-    user, csrf = await auth.rotate_refresh(db, request, response, request.cookies.get(REFRESH_COOKIE))
-    return await _auth_out(db, user, csrf)
+    user, csrf, mfa = await auth.rotate_refresh(db, request, response, request.cookies.get(REFRESH_COOKIE))
+    return await _auth_out(db, user, csrf, mfa_session=mfa)
 
 
 @router.post("/logout", response_model=Message)
@@ -119,7 +151,7 @@ async def logout_all(request: Request, response: Response, user: User = Depends(
     return Message(message="Signed out everywhere.")
 
 
-@router.post("/password/forgot", response_model=Message, dependencies=[Depends(auth_limit)])
+@router.post("/password/forgot", response_model=Message, dependencies=email_deps)
 async def forgot_password(body: EmailIn, request: Request, db: AsyncSession = Depends(get_db)) -> Message:
     user = (await db.execute(select(User).where(User.email == auth.normalise_email(body.email)))).scalar_one_or_none()
     if user and user.is_active:
@@ -140,6 +172,7 @@ async def reset_password(body: PasswordResetIn, request: Request, response: Resp
     await auth.revoke_all_sessions(db, user.id)
     await audit(db, "password_reset", request, user.id)
     await db.commit()
+    await forget_viewer(user.id)
     auth.clear_session(response)
     return Message(message="Password changed. Sign in with your new password.")
 
@@ -150,6 +183,7 @@ async def confirm_age(body: AgeConfirmIn, request: Request, user: User = Depends
     user.age_confirmed_at = user.age_confirmed_at or datetime.now(UTC)
     await audit(db, "age_confirmed", request, user.id)
     await db.commit()
+    await forget_viewer(user.id)
     return await user_out(db, user)
 
 
@@ -164,12 +198,25 @@ def _google_redirect_uri() -> str:
     return f"{settings.public_web_url.rstrip('/')}{settings.api_prefix}/auth/google/callback"
 
 
-async def google_authorize_url(link_user_id: uuid.UUID | None = None) -> str:
+OAUTH_COOKIE = "ap_oauth"
+OAUTH_COOKIE_PATH = "/api/v1/auth/google"
+OAUTH_FLOW_SECONDS = 600
+
+
+async def google_authorize_url(response: Response, link_user_id: uuid.UUID | None = None) -> str:
     """Google consent URL. With `link_user_id` the callback attaches the Google account to that signed-in user
-    instead of signing someone in. The state, nonce and PKCE verifier live in Redis for 10 minutes, single use."""
+    instead of signing someone in. The state, nonce and PKCE verifier live in Redis for 10 minutes, single use.
+
+    The flow is bound to this browser (RFC 9700 2.1.3): `response` gets an HttpOnly cookie whose digest is stored
+    with the state, and the callback refuses a state presented by a browser without it. Otherwise someone could
+    start a flow and send the callback (or, for linking, the consent URL) to another person."""
     state, nonce, verifier = secrets.token_urlsafe(24), secrets.token_urlsafe(24), secrets.token_urlsafe(48)
-    stored = {"nonce": nonce, "verifier": verifier, "link_user_id": str(link_user_id) if link_user_id else None}
-    await get_redis().set(f"oauth:google:{state}", json.dumps(stored), ex=600)
+    binding = secrets.token_urlsafe(32)
+    stored = {"nonce": nonce, "verifier": verifier, "binding": token_digest(binding),
+              "link_user_id": str(link_user_id) if link_user_id else None}
+    await get_redis().set(f"oauth:google:{state}", json.dumps(stored), ex=OAUTH_FLOW_SECONDS)
+    response.set_cookie(OAUTH_COOKIE, binding, max_age=OAUTH_FLOW_SECONDS, httponly=True, path=OAUTH_COOKIE_PATH,
+                        secure=settings.cookie_secure, samesite="lax", domain=settings.cookie_domain)
     params = httpx.QueryParams({
         "client_id": settings.google_client_id, "response_type": "code", "scope": "openid email profile",
         "redirect_uri": _google_redirect_uri(),
@@ -183,7 +230,9 @@ async def google_start() -> RedirectResponse:
     if not settings.google_client_id:
         # the browser navigated here from a button: send it back to a readable message, not a JSON error
         return RedirectResponse(f"{settings.public_web_url}/login?error=google_unavailable", status_code=302)
-    return RedirectResponse(await google_authorize_url(), status_code=302)
+    response = RedirectResponse("", status_code=302)
+    response.headers["location"] = await google_authorize_url(response)
+    return response
 
 
 def _verify_google_id_token(token: str, nonce: str) -> dict:
@@ -236,12 +285,25 @@ async def _link_google(db: AsyncSession, request: Request, user_id: str, subject
 @router.get("/google/callback", dependencies=[Depends(auth_limit)])
 async def google_callback(request: Request, code: str = "", state: str = "",
                           db: AsyncSession = Depends(get_db)) -> RedirectResponse:
+    response = await _google_callback(request, code, state, db)
+    response.delete_cookie(OAUTH_COOKIE, path=OAUTH_COOKIE_PATH, domain=settings.cookie_domain)  # single use
+    return response
+
+
+async def _google_callback(request: Request, code: str, state: str, db: AsyncSession) -> RedirectResponse:
     fail = _web_redirect("/login?error=google")
     stored = await get_redis().getdel(f"oauth:google:{state}") if state else None
     if not code or not stored:
         log.warning("google_oauth_failed", reason="missing_code" if not code else "unknown_or_used_state")
         return fail
     data = json.loads(stored)
+    binding = request.cookies.get(OAUTH_COOKIE, "")
+    if not binding or not hmac.compare_digest(token_digest(binding), data.get("binding") or ""):
+        # the state was started in another browser: never sign this one in or link from it
+        log.warning("google_oauth_failed", reason="browser_binding_mismatch")
+        await audit(db, "google_oauth_binding_mismatch", request, None)
+        await db.commit()
+        return fail
     id_token = await _exchange_google_code(code, data["verifier"])
     if id_token is None:
         return fail
@@ -279,7 +341,16 @@ async def google_callback(request: Request, code: str = "", state: str = "",
         log.warning("google_oauth_failed", reason="user_inactive", user_id=str(user.id))
         return fail
     user.email_verified_at = user.email_verified_at or datetime.now(UTC)
+    if user.mfa_enabled:
+        # Google proves the first factor only: the sign-in page asks for the authenticator code next
+        await audit(db, "login_google_ok_mfa_pending", request, user.id)
+        response = _web_redirect("/login?mfa=1")
+        await auth.start_mfa_challenge(response, user, via="google")
+        await db.commit()
+        await forget_viewer(user.id)
+        return response
     await audit(db, "login_google", request, user.id)
     response = _web_redirect("/dashboard" if user.age_confirmed_at else "/onboarding")
     await auth.issue_session(db, request, response, user)
+    await forget_viewer(user.id)
     return response

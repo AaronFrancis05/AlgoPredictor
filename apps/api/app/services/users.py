@@ -12,7 +12,7 @@ from app.services.entitlements import active_plan
 log = get_logger(__name__)
 
 
-async def user_out(db: AsyncSession, user: User) -> UserOut:
+async def user_out(db: AsyncSession, user: User, mfa_session: bool = False) -> UserOut:
     plan = await active_plan(db, user.id)
     google = (await db.execute(select(OAuthAccount.id).where(OAuthAccount.user_id == user.id,
                                                              OAuthAccount.provider == "google").limit(1))).first()
@@ -22,6 +22,7 @@ async def user_out(db: AsyncSession, user: User) -> UserOut:
                    plan=plan.code,
                    entitlements=plan.entitlements, has_api_key=user.api_key_digest is not None,
                    has_password=user.password_hash is not None, google_linked=google is not None,
+                   mfa_enabled=user.mfa_enabled, mfa_session=mfa_session and user.mfa_enabled,
                    created_at=user.created_at, account_retention_days=get_settings().account_retention_days)
 
 

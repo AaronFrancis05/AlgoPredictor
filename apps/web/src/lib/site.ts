@@ -1,8 +1,8 @@
 export const site = {
   name: "AlgoPredict",
-  tagline: "Model-based football predictions with honest probabilities",
+  tagline: "Know what to back before kick-off",
   description:
-    "Daily football picks from a machine-learning model tested on 38,000+ matches. See the real probability behind every pick, build slips to a target odd, and check our public track record. 18+.",
+    "See today's strongest football picks and how likely each one is to land. Build a slip to the odds you want in seconds, and check every past result. 18+.",
   url: process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000",
   supportEmail: "support@algopredict.app",
 } as const;

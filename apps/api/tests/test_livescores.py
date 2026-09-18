@@ -119,7 +119,9 @@ async def test_link_and_poll_updates_scores_within_budget(client, monkeypatch):
     feed[0] = fx(101, "Home0 FC", "Away0", kickoff, "FT", 90, 2, 1)
     async with get_sessionmaker()() as db:
         await ls.poll(db, now + timedelta(hours=1))
-    hist = (await client.get("/api/v1/picks/history")).json()
+    # kick-off dates are UK dates: near midnight UTC the UK date is already tomorrow, so ask for that day explicitly
+    hist = (await client.get("/api/v1/picks/history", params={"date_from": now.date().isoformat(),
+                                                             "date_to": kick.date().isoformat()})).json()
     done = {p["home_team"]: p for p in hist["picks"] if p["prediction_id"].startswith("lv")}
     assert done["Home0"]["phase"] == "finished" and done["Home0"]["outcome"] == "won"
     assert done["Home0"]["outcome_official"] is False and hist["summary"]["provisional"] >= 1
@@ -154,12 +156,15 @@ async def test_day_picks_carry_phase_and_history_hides_upcoming(client):
     raw, headers = signed({"results": results})
     assert (await client.post("/internal/ingest/results", content=raw, headers=headers)).status_code == 200
     future = make_picks((now + timedelta(days=1)).date(), 2, prefix="hf")
+    for i, p in enumerate(future):  # own team names: live states are keyed by (UK date, home, away), and near
+        p["home_team"], p["away_team"] = f"FutureHome{i}", f"FutureAway{i}"  # midnight UTC other tests share the date
     await publish(client, future)
 
     email = await register_verified(client)
     await login(client, email)  # free plan: history still shows every played pick
     day = (await client.get("/api/v1/picks", params={"date": future[0]["date"]})).json()
-    assert {p["phase"] for p in day["picks"]} == {"upcoming"}
+    # only this test's picks: near midnight UTC other tests' matches can share that UK date
+    assert {p["phase"] for p in day["picks"] if p["prediction_id"].startswith("hf")} == {"upcoming"}
     hist = (await client.get("/api/v1/picks/history", params={"date_from": past.date().isoformat(),
                                                              "date_to": now.date().isoformat()})).json()
     mine = {p["prediction_id"]: p for p in hist["picks"] if p["prediction_id"].startswith(("hs", "hf"))}

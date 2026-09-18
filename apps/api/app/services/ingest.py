@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache import invalidate
 from app.core.config import get_settings
+from app.core.events import publish
 from app.core.logging import get_logger
 from app.models import Pick, PickResult
 from app.schemas import IngestPick, IngestResult
@@ -74,6 +75,7 @@ async def ingest_results(db: AsyncSession, results: list[IngestResult]) -> tuple
 async def after_publish() -> None:
     await invalidate("picks")
     await invalidate("track_record")
+    await publish("picks")  # open pages refetch now
     s = get_settings()
     if not s.web_revalidate_url:
         return

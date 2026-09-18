@@ -12,7 +12,7 @@ import { site } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "Pricing",
-  description: "Free, Pro and Elite plans for AlgoPredict football predictions. Pay by card worldwide or mobile money in Africa. Cancel any time.",
+  description: "Start free with 3 picks a day, or unlock every pick, the daily top 10 and the slip builder. Pay by card or mobile money. Cancel any time.",
   alternates: { canonical: "/pricing" },
 };
 

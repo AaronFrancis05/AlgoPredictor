@@ -47,12 +47,38 @@ tests/                 one file per area; conftest sets SQLite + fakeredis
 - One person = one account. A Google sign-in finds the user by Google subject, else by verified email, and links.
   If the matched account's email was never verified, its password is removed and its sessions revoked before
   linking (prevents pre-registration hijacking).
-- Signed-in users manage methods under `/me` (CSRF enforced there; `/auth/google*` and `/auth/password*` are
-  CSRF-exempt, so do not put session-authenticated writes under those prefixes):
-  `POST /me/password` (add, or change with the current password; revokes other sessions),
+- Signed-in users manage methods under `/me` (CSRF enforced there; `/auth/google*`, `/auth/password*` and
+  `/auth/mfa*` are CSRF-exempt, so do not put session-authenticated writes under those prefixes):
+  `POST /me/password` (add, or change with the current password; revokes other sessions; keeps the session's mfa flag),
   `POST /me/google/link` (returns the Google URL; callback links to that user, refuses a Google account owned by
   someone else), `DELETE /me/google` (refused unless a password exists).
 - `UserOut` exposes `has_password` and `google_linked` for the account page.
+- The Google flow is bound to the browser that started it: `ap_oauth` (HttpOnly, path `/api/v1/auth/google`)
+  must match the digest stored with the state, or the callback refuses (login CSRF / link injection, RFC 9700).
+
+## Two-factor sign-in (TOTP)
+
+- `app/core/totp.py` (RFC 6238, stdlib). Secrets Fernet-encrypted with `MFA_ENCRYPTION_KEY` (required in production;
+  never change it casually), each code single-use (`totp_last_step`), 10 recovery codes stored as SHA-256 digests.
+- With two-factor on, password or Google sign-in only opens a 5-minute challenge (`ap_mfa` HttpOnly cookie, path
+  `/api/v1/auth/mfa`); `POST /auth/mfa/verify` issues the session with `mfa=true` in the JWT and on the refresh
+  family. 5 wrong codes end a challenge; `MFA_MAX_FAILURES` per user per 15 min locks the step.
+- `/me/mfa/setup|enable|recovery-codes|disable`. Enabling needs the current password (if any) and signs out other
+  sessions. `admin_user` requires two-factor on *and* an mfa session (`mfa_required` / `mfa_reauth`); API keys never
+  count as a second factor.
+
+## Database access
+
+- The API and worker connect as `algopredict_app` (data only, BYPASSRLS, no DDL); migrations use
+  `MIGRATION_DATABASE_URL` (owner). New tables get the app's grants from default privileges.
+- Production requires `DB_SSL=verify-full` against the bundled `certs/supabase-prod-ca-2021.crt`
+  (DER-identical to Supabase's published prod-ca-2021.crt; SHA-256 80:70:25:AD...CA:FA, valid to 2031-04-26).
+
+## Email guards
+
+Automatic email is capped: `EMAIL_PER_RECIPIENT_PER_HOUR` per address and purpose, `EMAIL_DAILY_BUDGET` per UTC
+day (Resend free plan: 100/day), and `RATE_LIMIT_EMAIL` per IP on register / resend-verification / forgot-password.
+A skipped send never changes the endpoint's reply.
 
 ## Rules
 

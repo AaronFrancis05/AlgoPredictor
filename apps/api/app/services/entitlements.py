@@ -105,10 +105,14 @@ def allows(plan: Plan, feature: str) -> bool:
 
 
 def require_entitlement(feature: str):
-    from app.deps import current_user  # local import to avoid a cycle
+    from app.deps import Viewer, optional_viewer  # local import to avoid a cycle
 
-    async def dependency(user: User = Depends(current_user), db: AsyncSession = Depends(get_db)) -> Plan:
-        plan = await active_plan(db, user.id)
+    async def dependency(viewer: Viewer | None = Depends(optional_viewer),
+                         db: AsyncSession = Depends(get_db)) -> Plan:
+        if viewer is None:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated",
+                                headers={"WWW-Authenticate": "Bearer"})
+        plan = await active_plan(db, viewer.id)
         if not allows(plan, feature):
             raise HTTPException(status.HTTP_403_FORBIDDEN,
                                 detail={"code": "upgrade_required", "feature": feature, "plan": plan.code})

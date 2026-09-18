@@ -6,7 +6,7 @@ import { Disclaimer, PickCard } from "@/components/picks";
 import { Alert, Card, PageHeader, Spinner } from "@/components/ui";
 import { ErrorPanel } from "@/components/upgrade";
 import { api } from "@/lib/api";
-import { isoDate, pct } from "@/lib/format";
+import { pct, today } from "@/lib/format";
 import { useNow } from "@/lib/hooks";
 import { Jackpot, type Pick } from "@/lib/schemas";
 
@@ -20,10 +20,12 @@ function DayTally({ legs }: { legs: Pick[] }) {
 
 export default function JackpotPage() {
   const now = useNow(30_000);
-  const q = useQuery({ queryKey: ["jackpot", isoDate()], queryFn: () => api(`/jackpot?week_of=${isoDate()}`, Jackpot),
+  const day = today(); // the viewer's date, so the week turns over at their midnight
+  const q = useQuery({ queryKey: ["jackpot", day], queryFn: () => api(`/jackpot?week_of=${day}`, Jackpot),
                        refetchInterval: 60_000 });
   const fmt = (d: string) =>
-    new Intl.DateTimeFormat(undefined, { weekday: "long", day: "numeric", month: "short" }).format(new Date(`${d}T12:00:00Z`));
+    new Intl.DateTimeFormat(undefined, { weekday: "long", day: "numeric", month: "short", timeZone: "UTC" })
+      .format(new Date(`${d}T12:00:00Z`));
 
   return (
     <>
