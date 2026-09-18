@@ -11,7 +11,9 @@ from app.models._common import UUIDPk, utcnow
 
 class Pick(Base):
     __tablename__ = "picks"
-    __table_args__ = (Index("ix_picks_day_conf", "kickoff_date", "confidence"),)
+    __table_args__ = (Index("ix_picks_day_conf", "kickoff_date", "confidence"),
+                      # picks_between: a date range read in kick-off order
+                      Index("ix_picks_day_kickoff", "kickoff_date", "kickoff_at"))
 
     prediction_id: Mapped[str] = mapped_column(String(40), primary_key=True)
     model_version: Mapped[str] = mapped_column(String(40))
@@ -52,6 +54,7 @@ class PickResult(Base):
 class Slip(UUIDPk, Base):
     """A target-odds slip generated for a user (kept for quotas and history)."""
     __tablename__ = "slips"
+    __table_args__ = (Index("ix_slips_user_kind_created", "user_id", "kind", "created_at"),)  # daily quota count
 
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True)
     kind: Mapped[str] = mapped_column(String(20))            # target_odds | jackpot | top10

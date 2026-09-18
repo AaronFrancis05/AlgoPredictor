@@ -20,6 +20,7 @@ import pytest  # noqa: E402
 from fakeredis import FakeAsyncRedis  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402
 
+from app.core.cache import clear_local  # noqa: E402
 from app.core.redis import set_redis  # noqa: E402
 from app.db.session import Base, get_engine  # noqa: E402
 from app.main import app  # noqa: E402
@@ -43,6 +44,7 @@ async def database():
 @pytest.fixture(autouse=True)
 async def clean_state():
     await _redis.flushall()
+    clear_local()
     mail.OUTBOX.clear()
     yield
 

@@ -8,6 +8,7 @@ from sqlalchemy import select
 from app.db.session import get_sessionmaker
 from app.models import Subscription, User
 from app.services import email as mail
+from app.services.entitlements import forget_user_plans
 
 PASSWORD = "Str0ng-password!"
 
@@ -36,3 +37,4 @@ async def give_plan(email: str, plan: str) -> None:
         db.add(Subscription(user_id=user.id, plan_code=plan, provider="manual", status="active",
                             current_period_end=datetime.now(UTC) + timedelta(days=30)))
         await db.commit()
+    await forget_user_plans()  # as the billing code does after applying an event

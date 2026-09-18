@@ -1,5 +1,5 @@
 """Pydantic v2 request/response models."""
-from datetime import date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Literal
 from uuid import UUID
 
@@ -108,11 +108,14 @@ class UserOut(BaseModel):
     email_verified: bool
     age_confirmed: bool
     is_admin: bool
+    role: str = "user"
     plan: str
     entitlements: dict
     has_api_key: bool
     has_password: bool
     google_linked: bool
+    created_at: datetime | None = None
+    account_retention_days: int
 
 
 class AuthOut(BaseModel):
@@ -261,6 +264,55 @@ class SubscriptionOut(BaseModel):
     status: str
     current_period_end: datetime | None
     cancel_at_period_end: bool
+
+
+# ---------------------------------------------------------------- access tokens (admin-issued plan grants)
+class AccessTokenIn(BaseModel):
+    plan_code: Literal["pro", "elite"]
+    expires_at: datetime
+    max_redemptions: int | None = Field(default=None, ge=1, le=100_000)
+    note: str = Field(default="", max_length=120)
+
+    @field_validator("expires_at")
+    @classmethod
+    def within_two_years(cls, v: datetime) -> datetime:
+        v = v if v.tzinfo else v.replace(tzinfo=UTC)
+        if v > datetime.now(UTC) + timedelta(days=731):
+            raise ValueError("expiry can be at most two years ahead")
+        return v
+
+
+class AccessTokenRedeemer(BaseModel):
+    email: str
+    redeemed_at: datetime
+    status: str
+
+
+class AccessTokenOut(BaseModel):
+    id: UUID
+    code_hint: str
+    plan_code: str
+    expires_at: datetime
+    max_redemptions: int | None
+    redemptions: int
+    note: str
+    status: Literal["active", "expired", "used_up", "revoked"]
+    created_at: datetime
+    revoked_at: datetime | None
+    redeemed_by: list[AccessTokenRedeemer] = []
+
+
+class AccessTokenCreatedOut(AccessTokenOut):
+    code: str  # shown once
+
+
+class RedeemIn(BaseModel):
+    code: str = Field(min_length=8, max_length=40)
+
+
+class RoleIn(BaseModel):
+    email: EmailStr
+    role: Literal["user", "admin"]
 
 
 # ---------------------------------------------------------------- ingest

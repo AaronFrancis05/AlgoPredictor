@@ -12,7 +12,7 @@ from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.db.session import get_sessionmaker
 from app.models import WebhookEvent
-from app.services import billing, picks_service
+from app.services import billing, picks_service, users
 
 log = get_logger("worker")
 
@@ -39,6 +39,12 @@ async def warm_cache(ctx) -> None:
         await picks_service.track_record(db)
 
 
+async def purge_closed_accounts(ctx) -> int:
+    """Erase accounts whose retention period after closure has ended."""
+    async with get_sessionmaker()() as db:
+        return await users.purge_closed_accounts(db)
+
+
 async def startup(ctx) -> None:
     configure_logging(get_settings().log_level)
 
@@ -56,7 +62,8 @@ class WorkerSettings:
     # Nothing enqueues ad-hoc jobs (only the crons below), so polling slowly loses nothing; each poll is one
     # billed Redis command on Upstash. Crons fire at most poll_delay seconds late.
     poll_delay = get_settings().worker_poll_delay_seconds
-    functions = [retry_failed_webhooks, warm_cache]
+    functions = [retry_failed_webhooks, warm_cache, purge_closed_accounts]
     cron_jobs = [cron(retry_failed_webhooks, minute=set(range(0, 60, 5))),
-                 cron(warm_cache, minute=set(range(0, 60, 10)))]
+                 cron(warm_cache, minute=set(range(0, 60, 10))),
+                 cron(purge_closed_accounts, hour={3}, minute={17})]
     on_startup = startup

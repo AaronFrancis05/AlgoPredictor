@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, String, Uuid
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -10,6 +10,7 @@ from app.models._common import UUIDPk, utcnow
 
 class AuditLog(UUIDPk, Base):
     __tablename__ = "audit_logs"
+    __table_args__ = (Index("ix_audit_logs_user_created", "user_id", "created_at"),)  # data export, newest first
 
     user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("users.id", ondelete="SET NULL"), index=True)
     action: Mapped[str] = mapped_column(String(60), index=True)

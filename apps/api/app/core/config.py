@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     max_login_failures: int = 5
     lockout_minutes: int = 15
     email_token_hours: int = 24
+    # Closed accounts are disabled at once and erased this many days later (restorable by support until then).
+    # Set it to the period your legal advice requires. Payment records are kept separately, without the identity.
+    account_retention_days: int = Field(default=30, ge=0, le=3650)
 
     google_client_id: str = ""
     google_client_secret: SecretStr = SecretStr("")

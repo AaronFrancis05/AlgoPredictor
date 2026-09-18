@@ -46,6 +46,8 @@ async def checkout(body: CheckoutIn, request: Request, user: User = Depends(curr
                    db: AsyncSession = Depends(get_db)) -> RedirectOut:
     if user.email_verified_at is None or user.age_confirmed_at is None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail={"code": "verify_first"})
+    if user.is_admin:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail={"code": "admin_full_access"})
     price = await billing.find_price(db, body.plan_code, body.currency, body.interval)
     if body.provider == "stripe":
         url = await billing.stripe_checkout(db, user, price)

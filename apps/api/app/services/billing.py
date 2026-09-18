@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.models import Payment, Price, Subscription, User, WebhookEvent
-from app.services.entitlements import ZERO_DECIMAL_CURRENCIES, major_units
+from app.services.entitlements import ZERO_DECIMAL_CURRENCIES, forget_user_plans, major_units
 
 log = get_logger(__name__)
 FLW_BASE = "https://api.flutterwave.com/v3"
@@ -249,3 +249,4 @@ async def process_event(db: AsyncSession, provider: str, event_id: str) -> None:
         row.error = f"{e.__class__.__name__}: {e}"[:2000]
         log.error("webhook_processing_failed", provider=provider, event_id=event_id, error=row.error)
     await db.commit()
+    await forget_user_plans()  # a subscription may have changed: no one waits for the plan cache to expire

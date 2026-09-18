@@ -18,7 +18,14 @@ export const appNav = [
   { href: "/top-picks", label: "Top 10" },
   { href: "/slip-builder", label: "Slip builder" },
   { href: "/jackpot", label: "Weekly jackpot" },
+] as const;
+
+/** Signed-in user menu (Account lives here rather than among the prediction tabs). */
+export const accountNav = [
   { href: "/account", label: "Account" },
+  { href: "/account/billing", label: "Billing" },
+  { href: "/pricing", label: "Plans" },
+  { href: "/track-record", label: "Track record" },
 ] as const;
 
 export const leagueNames: Record<string, string> = {

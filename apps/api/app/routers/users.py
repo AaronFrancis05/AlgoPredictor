@@ -7,14 +7,15 @@ from app.core.config import get_settings
 from app.core.ratelimit import rate_limit
 from app.core.security import hash_password, new_opaque_token, token_digest, verify_password
 from app.db.session import get_db
-from app.deps import current_user
+from app.deps import current_user, verified_adult
 from app.models import AuditLog, OAuthAccount, Payment, Slip, Subscription, User
 from app.routers.auth import google_authorize_url
-from app.schemas import ApiKeyOut, GoogleLinkOut, Message, PasswordSetIn, UserOut
+from app.schemas import ApiKeyOut, GoogleLinkOut, Message, PasswordSetIn, RedeemIn, UserOut
+from app.services import access_tokens
 from app.services import auth_service as auth
 from app.services.audit import audit
 from app.services.entitlements import require_entitlement
-from app.services.users import user_out
+from app.services.users import close_account, user_out
 
 router = APIRouter(prefix="/me", tags=["account"])
 settings = get_settings()
@@ -64,6 +65,19 @@ async def unlink_google(request: Request, user: User = Depends(current_user),
     return Message(message="Google disconnected. Sign in with your email and password from now on.")
 
 
+@router.post("/access-token", response_model=Message, dependencies=[Depends(auth_limit)])
+async def redeem_access_token(body: RedeemIn, request: Request, user: User = Depends(verified_adult),
+                              db: AsyncSession = Depends(get_db)) -> Message:
+    """Redeem an admin-issued code: the token's plan until the token expires. Rate limited like sign-in, so
+    codes cannot be guessed by brute force."""
+    sub = await access_tokens.redeem(db, user, body.code)
+    await audit(db, "access_token_redeemed", request, user.id, token=str(sub.access_token_id), plan=sub.plan_code)
+    await db.commit()
+    await access_tokens.after_change()
+    return Message(message=f"Code accepted. You have the {sub.plan_code.capitalize()} plan until "
+                           f"{sub.current_period_end:%d %B %Y, %H:%M} UTC.")
+
+
 @router.post("/api-key", response_model=ApiKeyOut, dependencies=[Depends(require_entitlement("api_access"))])
 async def create_api_key(request: Request, user: User = Depends(current_user),
                          db: AsyncSession = Depends(get_db)) -> ApiKeyOut:
@@ -108,10 +122,14 @@ async def export_data(user: User = Depends(current_user), db: AsyncSession = Dep
 @router.delete("", response_model=Message)
 async def delete_account(request: Request, response: Response, user: User = Depends(current_user),
                          db: AsyncSession = Depends(get_db)) -> Message:
-    """Delete the account. Payment records keep amounts for accounting but lose the link to the person."""
-    await audit(db, "account_deleted", request, None)
-    await db.delete(user)
+    """Close the account. It is disabled at once (sessions revoked, API key removed) and erased by the worker
+    after ACCOUNT_RETENTION_DAYS. Payment records keep amounts for accounting but lose the link to the person."""
+    erase_on = close_account(user)
+    await auth.revoke_all_sessions(db, user.id)
+    await audit(db, "account_closed", request, user.id, erase_after=erase_on.isoformat())
     await db.commit()
     auth.clear_session(response)
-    return Message(message="Your account has been deleted. Cancel any card subscription in the billing portal "
-                           "first if it is still active.")
+    days = settings.account_retention_days
+    when = f"on {erase_on:%d %B %Y}" if days else "now"
+    return Message(message=f"Your account is closed and you have been signed out. Your data will be erased {when}. "
+                           f"Cancel any card subscription in the billing portal if it is still active.")
