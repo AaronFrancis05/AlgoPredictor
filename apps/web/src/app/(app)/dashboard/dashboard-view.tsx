@@ -11,6 +11,8 @@ import {
 } from "@/components/picks";
 import { Button, ButtonLink, Card, EmptyState, Segmented, Select, Skeleton } from "@/components/ui";
 import { ErrorPanel } from "@/components/upgrade";
+import { FollowLeagueButton } from "@/components/follow-button";
+import { useFollows } from "@/lib/follows";
 import { cn, isoDate, today as todayLocal } from "@/lib/format";
 import { useMe, useNow, useToday } from "@/lib/hooks";
 import { phaseAt } from "@/lib/match";
@@ -86,10 +88,11 @@ function useDashboardParams() {
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   };
   return {
-    day, league, sort,
+    day, league, sort, following: params.get("show") === "following",
     setDay: (d: string) => set({ date: d === today ? null : d, league: null }),
     setLeague: (l: string) => set({ league: l === "all" ? null : l }),
     setSort: (s: Sort) => set({ sort: s === "kickoff" ? null : s }),
+    setFollowing: (on: boolean) => set({ show: on ? "following" : null }),
   };
 }
 
@@ -264,7 +267,9 @@ function sortPicks(picks: Pick[], sort: Sort): Pick[] {
 }
 
 function DashboardView() {
-  const { day, league, sort, setDay: selectDay, setLeague, setSort } = useDashboardParams();
+  const { day, league, sort, following, setDay: selectDay, setLeague, setSort, setFollowing } = useDashboardParams();
+  const follows = useFollows();
+  const onlyFollowed = following && follows != null;
   const me = useMe();
   const qc = useQueryClient();
   const isToday = day === todayLocal();
@@ -290,9 +295,10 @@ function DashboardView() {
     [data],
   );
   const parts = useMemo(() => {
-    const all = (data?.picks ?? []).filter((p) => league === "all" || p.league_code === league);
+    const all = (data?.picks ?? []).filter((p) => (league === "all" || p.league_code === league)
+                                                   && (!onlyFollowed || follows.isFollowed(p)));
     return split(sortPicks(all, sort), now);
-  }, [data, league, sort, now]);
+  }, [data, league, sort, now, onlyFollowed, follows]);
   const filtered = parts.upcoming;
   const open = filtered.filter((p) => !p.locked);
   const locked = filtered.filter((p) => p.locked);
@@ -347,6 +353,12 @@ function DashboardView() {
                 </Select>
                 <Segmented<Sort> label="Sort by" value={sort} onChange={setSort}
                                  options={[{ value: "kickoff", label: "Kick-off" }, { value: "confidence", label: "Confidence" }]} />
+                {follows ? (
+                  <Segmented<"all" | "following"> label="Show" value={following ? "following" : "all"}
+                                                  onChange={(v) => setFollowing(v === "following")}
+                                                  options={[{ value: "all", label: "All" }, { value: "following", label: "Following" }]} />
+                ) : null}
+                {league !== "all" ? <FollowLeagueButton code={league} name={leagueName(league)} /> : null}
               </div>
               <Segmented<View> label="View" value={view} onChange={setView} options={[
                 { value: "cards", label: <><LayoutGrid className="h-3.5 w-3.5" aria-hidden />Cards</> },
@@ -382,7 +394,9 @@ function DashboardView() {
               <Card className="text-sm text-muted">
                 {parts.live.length + parts.done.length > 0
                   ? "Every match on this day has kicked off. Nothing left to play."
-                  : "No picks in this league for the day."}
+                  : onlyFollowed
+                    ? "Nothing you follow is on this day. Star a match or follow a league to see it here."
+                    : "No picks in this league for the day."}
               </Card>
             ) : null}
             {parts.done.length > 0 ? <FinishedNote count={parts.done.length} day={day} /> : null}

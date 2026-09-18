@@ -12,6 +12,16 @@ import { visitorHeaders } from "@/lib/client-ip";
 const APP_PREFIXES = ["/dashboard", "/live", "/history", "/top-picks", "/slip-builder", "/jackpot", "/account",
                       "/onboarding", "/admin"];
 
+/** Origin of the live-events stream when it is served straight from the API (see lib/live-events.ts). */
+const eventsOrigin = (() => {
+  try {
+    const url = process.env.NEXT_PUBLIC_EVENTS_URL;
+    return url && /^https?:\/\//.test(url) ? new URL(url).origin : null;
+  } catch {
+    return null;
+  }
+})();
+
 /** API calls are rewritten to FastAPI; tell it who the visitor is so its rate limits key on them, not on us. */
 function forwardToApi(request: NextRequest) {
   const headers = new Headers(request.headers);
@@ -46,7 +56,7 @@ export function proxy(request: NextRequest) {
     "style-src-attr 'unsafe-inline'",
     "img-src 'self' blob: data:",
     "font-src 'self'",
-    "connect-src 'self'",
+    `connect-src 'self'${eventsOrigin ? ` ${eventsOrigin}` : ""}`,
     "object-src 'none'",
     "base-uri 'self'",
     // checkout pages of the payment providers are reached by redirect (not form posts), 'self' is enough

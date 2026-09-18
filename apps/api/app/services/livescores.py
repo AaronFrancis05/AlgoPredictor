@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache import cached, invalidate
 from app.core.config import get_settings
+from app.core.events import publish
 from app.core.logging import get_logger
 from app.core.redis import get_redis
 from app.models import LiveMatch, LiveTeamAlias, Pick
@@ -314,6 +315,7 @@ async def link_matches(db: AsyncSession, now: datetime, force: bool = False) -> 
     await db.commit()
     if made:
         await invalidate(CACHE_NS)
+        await publish("live")
         log.info("livescore_linked", count=made)
     return made
 
@@ -388,6 +390,7 @@ async def poll(db: AsyncSession, now: datetime) -> int:
     await db.commit()
     if changed:
         await invalidate(CACHE_NS)
+        await publish("live")  # open pages show the new score at once
     return changed
 
 
@@ -457,4 +460,5 @@ async def admin_link(db: AsyncSession, key: str, fixture_id: int | None, now: da
                 await db.merge(LiveTeamAlias(provider=PROVIDER, provider_name=n, team=team))
     await db.commit()
     await invalidate(CACHE_NS)
+    await publish("live")
     return m

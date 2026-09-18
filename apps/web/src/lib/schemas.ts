@@ -155,6 +155,9 @@ export const TrackRecord = z.object({
 });
 export type TrackRecord = z.infer<typeof TrackRecord>;
 
+export const Follows = z.object({ matches: z.array(z.string()), leagues: z.array(z.string()) });
+export type Follows = z.infer<typeof Follows>;
+
 export const Entitlements = z.object({
   picks_per_day: z.number().nullable(),
   reveal_hours_before_kickoff: z.number().nullable(),

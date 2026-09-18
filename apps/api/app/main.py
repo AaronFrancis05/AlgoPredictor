@@ -18,7 +18,7 @@ from app.core.middleware import (
 )
 from app.core.ratelimit import rate_limit
 from app.db.session import dispose_engine
-from app.routers import admin, auth, billing, health, internal, picks, users
+from app.routers import admin, auth, billing, events, health, internal, picks, users
 
 
 @asynccontextmanager
@@ -54,7 +54,7 @@ def create_app() -> FastAPI:
     default_limit = rate_limit("default", s.rate_limit_default)
     from fastapi import Depends
     api_deps = [Depends(default_limit)]
-    for r in (auth.router, users.router, picks.router, billing.router, admin.router):
+    for r in (auth.router, users.router, picks.router, billing.router, admin.router, events.router):
         app.include_router(r, prefix=s.api_prefix, dependencies=api_deps)
     app.include_router(billing.webhooks)
     app.include_router(internal.router)

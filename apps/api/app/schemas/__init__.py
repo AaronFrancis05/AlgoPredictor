@@ -124,6 +124,11 @@ class AuthOut(BaseModel):
     access_token_expires_in: int
 
 
+class FollowsOut(BaseModel):
+    matches: list[str]               # prediction_ids
+    leagues: list[str]               # league codes
+
+
 class ApiKeyOut(BaseModel):
     api_key: str
     note: str = "Shown once. Store it securely; send it in the X-API-Key header."

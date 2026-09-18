@@ -1,6 +1,6 @@
 "use client";
 
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CalendarDays,
   ChevronDown,
@@ -25,8 +25,12 @@ import { Logo } from "@/components/site-chrome";
 import { Alert, Badge, Container, Skeleton } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { cn, initials } from "@/lib/format";
-import { useLive, useMe, useNow } from "@/lib/hooks";
+import { FollowsProvider, useFollows } from "@/lib/follows";
+import { useLive, useMe, useNow, useToday } from "@/lib/hooks";
+import { useLiveEvents } from "@/lib/live-events";
 import { phaseAt } from "@/lib/match";
+import { useMatchNotifications, useNotifySetting } from "@/lib/notify";
+import { picksQuery } from "@/lib/queries";
 import { Message, type User } from "@/lib/schemas";
 import { accountNav, appNav } from "@/lib/site";
 
@@ -186,6 +190,18 @@ function NavLinks({ pathname, compact = false, liveCount = 0 }: { pathname: stri
   );
 }
 
+/** Pushed updates, and notifications for followed matches (with today's list kept loaded, as the live list drops
+ * a match at full time). */
+function LiveWiring({ enabled }: { enabled: boolean }) {
+  const [notify] = useNotifySetting();
+  const follows = useFollows();
+  const today = useToday();
+  useLiveEvents(enabled, enabled && notify);
+  useMatchNotifications(enabled && notify, follows?.isFollowed ?? null);
+  useQuery({ ...picksQuery(today), enabled: enabled && notify });
+  return null;
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -205,8 +221,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   const user = me.data;
-  const liveCount = useLiveCount(Boolean(user?.email_verified && user?.age_confirmed));
+  const verified = Boolean(user?.email_verified && user?.age_confirmed);
+  const liveCount = useLiveCount(verified);
   return (
+    <FollowsProvider enabled={verified}>
+    <LiveWiring enabled={verified} />
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-40 border-b border-border bg-bg/90 backdrop-blur">
         <Container className="flex h-16 items-center gap-6">
@@ -254,5 +273,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         </Container>
       </main>
     </div>
+    </FollowsProvider>
   );
 }

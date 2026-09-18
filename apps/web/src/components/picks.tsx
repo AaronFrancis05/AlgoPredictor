@@ -1,5 +1,6 @@
 import { Check, Lock, X } from "lucide-react";
 
+import { FollowButton } from "@/components/follow-button";
 import { Badge, Card } from "@/components/ui";
 import { cn, kickoff, kickoffTime, localDay, odds, pct, pickLabel, prob } from "@/lib/format";
 import { hasScore, matchClock, onCourse, phaseAt } from "@/lib/match";
@@ -148,6 +149,7 @@ export function PickCard({ pick, showValue = false, day, now }: {
         <div className="flex shrink-0 items-center gap-1">
           {pick.is_demo ? <Badge className="border-warn/50 text-warn">Demo data</Badge> : null}
           <TierBadge tier={pick.tier} hitRate={pick.tier_hit_rate} />
+          <FollowButton pick={pick} className="-mr-2" />
         </div>
       </div>
 
@@ -240,8 +242,9 @@ export function MatchRow({ pick, now, day, showDate = false }: { pick: Pick; now
           </>
         )}
       </div>
-      <div className="flex justify-end">
+      <div className="flex items-center justify-end gap-1">
         {pick.outcome ? <OutcomeBadge pick={pick} /> : phase === "live" ? <CourseTag pick={pick} /> : pick.locked ? null : <TierBadge tier={pick.tier} />}
+        <FollowButton pick={pick} className="-mr-2" />
       </div>
     </li>
   );

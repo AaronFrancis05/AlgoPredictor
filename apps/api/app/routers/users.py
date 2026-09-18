@@ -1,6 +1,9 @@
-"""Account self-service: profile, API key (Elite), data export and deletion."""
+"""Account self-service: profile, follows, API key (Elite), data export and deletion."""
+import re
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -8,9 +11,9 @@ from app.core.ratelimit import rate_limit
 from app.core.security import hash_password, new_opaque_token, token_digest, verify_password
 from app.db.session import get_db
 from app.deps import current_user, forget_viewer, verified_adult
-from app.models import AuditLog, OAuthAccount, Payment, Slip, Subscription, User
+from app.models import AuditLog, OAuthAccount, Payment, Slip, Subscription, User, UserFollow
 from app.routers.auth import google_authorize_url
-from app.schemas import ApiKeyOut, GoogleLinkOut, Message, PasswordSetIn, RedeemIn, UserOut
+from app.schemas import ApiKeyOut, FollowsOut, GoogleLinkOut, Message, PasswordSetIn, RedeemIn, UserOut
 from app.services import access_tokens
 from app.services import auth_service as auth
 from app.services.audit import audit
@@ -98,6 +101,48 @@ async def delete_api_key(request: Request, user: User = Depends(current_user),
     return Message(message="API key deleted.")
 
 
+# ------------------------------------------------------------------ follows (matches and leagues)
+MAX_FOLLOWS = 300
+FOLLOW_TARGET = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
+
+
+async def _follows(db: AsyncSession, user_id) -> FollowsOut:
+    rows = (await db.execute(select(UserFollow.kind, UserFollow.target).where(UserFollow.user_id == user_id)
+                             .order_by(UserFollow.created_at))).all()
+    return FollowsOut(matches=[t for k, t in rows if k == "match"], leagues=[t for k, t in rows if k == "league"])
+
+
+@router.get("/follows", response_model=FollowsOut)
+async def list_follows(user: User = Depends(current_user), db: AsyncSession = Depends(get_db)) -> FollowsOut:
+    return await _follows(db, user.id)
+
+
+@router.put("/follows/{kind}/{target}", response_model=FollowsOut)
+async def follow(kind: Literal["match", "league"], target: str, user: User = Depends(current_user),
+                 db: AsyncSession = Depends(get_db)) -> FollowsOut:
+    """Follow a match (its prediction_id) or a league (its code). Idempotent."""
+    if not FOLLOW_TARGET.match(target):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Invalid follow target")
+    exists = await db.get(UserFollow, (user.id, kind, target))
+    if exists is None:
+        count = (await db.execute(select(func.count()).select_from(UserFollow)
+                                  .where(UserFollow.user_id == user.id))).scalar_one()
+        if count >= MAX_FOLLOWS:
+            raise HTTPException(status.HTTP_409_CONFLICT, detail={"code": "follow_limit", "limit": MAX_FOLLOWS})
+        db.add(UserFollow(user_id=user.id, kind=kind, target=target))
+        await db.commit()
+    return await _follows(db, user.id)
+
+
+@router.delete("/follows/{kind}/{target}", response_model=FollowsOut)
+async def unfollow(kind: Literal["match", "league"], target: str, user: User = Depends(current_user),
+                   db: AsyncSession = Depends(get_db)) -> FollowsOut:
+    await db.execute(delete(UserFollow).where(UserFollow.user_id == user.id, UserFollow.kind == kind,
+                                              UserFollow.target == target))
+    await db.commit()
+    return await _follows(db, user.id)
+
+
 @router.get("/export")
 async def export_data(user: User = Depends(current_user), db: AsyncSession = Depends(get_db)) -> dict:
     """Everything stored about the account (GDPR-style access request)."""
@@ -115,6 +160,7 @@ async def export_data(user: User = Depends(current_user), db: AsyncSession = Dep
                        created_at=p.created_at) for p in pays],
         slips=[dict(kind=s.kind, target_odds=s.target_odds, combined_odds=s.combined_odds, legs=s.legs,
                     created_at=s.created_at) for s in slips],
+        follows=(await _follows(db, user.id)).model_dump(),
         security_events=[dict(action=a.action, created_at=a.created_at) for a in logs],
     )
 
