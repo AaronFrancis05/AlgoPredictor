@@ -58,7 +58,9 @@ class Settings(BaseSettings):
     flutterwave_secret_key: SecretStr = SecretStr("")
     flutterwave_webhook_hash: SecretStr = SecretStr("")
 
-    # email
+    # email: Resend's HTTPS API when RESEND_API_KEY is set (Railway blocks outbound SMTP on trial/Hobby),
+    # otherwise SMTP (Mailpit locally). SMTP_FROM is the sender for both and must be on a Resend-verified domain.
+    resend_api_key: SecretStr = SecretStr("")
     smtp_host: str = "localhost"
     smtp_port: int = 1025
     smtp_from: str = "AlgoPredict <no-reply@algopredict.local>"
