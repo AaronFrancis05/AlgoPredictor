@@ -70,12 +70,15 @@ class Settings(BaseSettings):
     rate_limit_auth: str = "5/60"
     rate_limit_products: str = "30/60"
 
-    # measured walk-forward hit rates of the current champion (reports/train_20260917_0847.md, cb_market)
+    # measured walk-forward hit rates of the current champion (reports/train_20260917_0847.md).
+    # Only the hit rates and the match count are public; model name, method and RPS stay internal.
     tier_hit_rates: dict[str, float] = Field(
         default_factory=lambda: {"Strong": 0.745, "Medium": 0.570, "Lean": 0.419})
-    tier_hit_rates_source: str = "walk-forward 2021/22-2025/26, cb_market, 38,732 matches"
-    backtest_model_rps: float = 0.20293       # cb_market mean RPS, same report
-    backtest_bookmaker_rps: float = 0.20321   # bookmaker baseline on the same rows
+    backtest_matches: int = 38732
+
+    @property
+    def tier_hit_rates_label(self) -> str:
+        return f"{self.backtest_matches:,} past matches"
 
     @property
     def is_production(self) -> bool:

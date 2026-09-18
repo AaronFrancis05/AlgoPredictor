@@ -213,7 +213,6 @@ class JackpotOut(BaseModel):
 class TrackRecordOut(BaseModel):
     graded: int
     hit_rate: float | None
-    mean_rps: float | None
     by_tier: list[dict]
     by_month: list[dict]
     recent: list[PickOut]

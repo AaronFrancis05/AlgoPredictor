@@ -70,14 +70,13 @@ export type Jackpot = z.infer<typeof Jackpot>;
 export const TrackRecord = z.object({
   graded: z.number(),
   hit_rate: z.number().nullable(),
-  mean_rps: z.number().nullable(),
   by_tier: z.array(z.object({ tier: z.string(), graded: z.number(), hit_rate: z.number(),
                               avg_confidence: z.number() })),
-  by_month: z.array(z.object({ month: z.string(), graded: z.number(), hit_rate: z.number(), mean_rps: z.number() })),
+  by_month: z.array(z.object({ month: z.string(), graded: z.number(), hit_rate: z.number() })),
   recent: z.array(Pick),
   live_since: z.string().nullable(),
-  backtest: z.object({ source: z.string(), tier_hit_rates: z.record(z.string(), z.number()),
-                       model_rps: z.number(), bookmaker_rps: z.number(), note: z.string() }),
+  backtest: z.object({ matches: z.number().optional(), tier_hit_rates: z.record(z.string(), z.number()),
+                       note: z.string() }),
 });
 export type TrackRecord = z.infer<typeof TrackRecord>;
 
