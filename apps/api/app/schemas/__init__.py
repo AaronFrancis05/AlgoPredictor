@@ -74,6 +74,21 @@ class PasswordResetIn(BaseModel):
         return _strong_password(v)
 
 
+class PasswordSetIn(BaseModel):
+    """Set a first password (Google-only account) or change it. Changing needs the current password."""
+    current_password: str | None = Field(default=None, max_length=128)
+    password: str = Field(min_length=PASSWORD_MIN, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def strong_password(cls, v: str) -> str:
+        return _strong_password(v)
+
+
+class GoogleLinkOut(BaseModel):
+    url: str
+
+
 class AgeConfirmIn(BaseModel):
     confirm_age_18: bool
 
@@ -96,6 +111,8 @@ class UserOut(BaseModel):
     plan: str
     entitlements: dict
     has_api_key: bool
+    has_password: bool
+    google_linked: bool
 
 
 class AuthOut(BaseModel):

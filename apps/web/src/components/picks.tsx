@@ -33,7 +33,7 @@ export function ProbabilityBar({ pick }: { pick: Pick }) {
   ];
   return (
     <div>
-      <div className="flex h-2 overflow-hidden rounded-full bg-surface-2" aria-hidden>
+      <div className="flex h-1.5 overflow-hidden bg-surface-2" aria-hidden>
         {parts.map((p) => (
           <div key={p.key} className={cn(p.cls, pick.pick === p.key ? "" : "opacity-40")} style={{ width: `${p.v * 100}%` }} />
         ))}
@@ -84,27 +84,27 @@ export function PickCard({ pick, showValue = false }: { pick: Pick; showValue?: 
             </div>
             <div className="text-right">
               <p className="text-xs uppercase tracking-wide text-muted">Model probability</p>
-              <p className="text-lg font-bold tabular-nums">{prob(pick.confidence)}</p>
+              <p className="num text-lg font-semibold">{prob(pick.confidence)}</p>
             </div>
           </div>
           <ProbabilityBar pick={pick} />
           <dl className="grid grid-cols-3 gap-2 text-xs">
             <div>
               <dt className="text-muted">Fair odds</dt>
-              <dd className="font-semibold tabular-nums">{odds(pick.fair_odds)}</dd>
+              <dd className="num font-medium">{odds(pick.fair_odds)}</dd>
             </div>
             <div>
               <dt className="text-muted">Market odds</dt>
-              <dd className="font-semibold tabular-nums">{odds(pick.odds)}</dd>
+              <dd className="num font-medium">{odds(pick.odds)}</dd>
             </div>
             <div>
               <dt className="text-muted">Tier hit rate</dt>
-              <dd className="font-semibold tabular-nums">{pct(pick.tier_hit_rate, 0)}</dd>
+              <dd className="num font-medium">{pct(pick.tier_hit_rate, 0)}</dd>
             </div>
           </dl>
           {showValue && pick.value_flag ? (
             <Badge className="w-fit border-brand/50 bg-brand/15 text-brand">
-              VALUE · edge {pick.edge != null ? `${(pick.edge * 100).toFixed(1)}%` : "—"}
+              VALUE · edge {pick.edge != null ? `${(pick.edge * 100).toFixed(1)}%` : "n/a"}
             </Badge>
           ) : null}
         </>
@@ -123,7 +123,7 @@ export function Disclaimer({ text }: { text?: string }) {
     <p className="text-xs leading-relaxed text-muted">
       {text ??
         "Predictions are model probabilities, not certainties. Even the Strong tier loses about one match in four in historical testing. 18+ only."}{" "}
-      Please gamble responsibly —{" "}
+      Please gamble responsibly. If you need support,{" "}
       <a className="underline" href="/responsible-gambling">
         get help
       </a>

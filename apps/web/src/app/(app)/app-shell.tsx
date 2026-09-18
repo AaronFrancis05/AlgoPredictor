@@ -61,7 +61,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <Container>
           {me.isLoading ? <Spinner /> : null}
           {user && !user.email_verified ? (
-            <div className="mb-6"><Alert tone="warn">Confirm your email address to unlock predictions — check your inbox.</Alert></div>
+            <div className="mb-6"><Alert tone="warn">Confirm your email address to unlock predictions. Check your inbox.</Alert></div>
           ) : null}
           {user && user.email_verified && !user.age_confirmed && pathname !== "/onboarding" ? (
             <div className="mb-6"><Alert tone="warn">Please <Link className="underline" href="/onboarding">confirm you are 18+</Link> to see predictions.</Alert></div>

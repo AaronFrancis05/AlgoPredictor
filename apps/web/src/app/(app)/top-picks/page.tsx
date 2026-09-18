@@ -26,7 +26,7 @@ export default function TopPicks() {
           <ol className="grid gap-4 md:grid-cols-2">
             {q.data.picks.map((p, i) => (
               <li key={p.prediction_id} className="relative">
-                <span className="absolute -left-2 -top-2 z-10 grid h-7 w-7 place-items-center rounded-full bg-brand text-xs font-bold text-brand-fg">
+                <span className="absolute -left-2 -top-2 z-10 grid h-7 w-7 place-items-center rounded-sm bg-brand text-xs font-bold text-brand-fg">
                   {i + 1}
                 </span>
                 <PickCard pick={p} showValue={Boolean(me.data?.entitlements.value_flags)} />

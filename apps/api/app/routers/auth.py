@@ -1,12 +1,14 @@
+import asyncio
 import base64
 import hashlib
 import json
 import secrets
+import uuid
 from datetime import UTC, datetime
 
 import httpx
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -152,18 +154,32 @@ def _b64(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
 
+def _google_redirect_uri() -> str:
+    # Google returns to the web origin, which proxies /api/v1 to this API. The session cookies set on the callback
+    # response are then first-party for the site. Returning to PUBLIC_API_URL would set them on the API's domain.
+    return f"{settings.public_web_url.rstrip('/')}{settings.api_prefix}/auth/google/callback"
+
+
+async def google_authorize_url(link_user_id: uuid.UUID | None = None) -> str:
+    """Google consent URL. With `link_user_id` the callback attaches the Google account to that signed-in user
+    instead of signing someone in. The state, nonce and PKCE verifier live in Redis for 10 minutes, single use."""
+    state, nonce, verifier = secrets.token_urlsafe(24), secrets.token_urlsafe(24), secrets.token_urlsafe(48)
+    stored = {"nonce": nonce, "verifier": verifier, "link_user_id": str(link_user_id) if link_user_id else None}
+    await get_redis().set(f"oauth:google:{state}", json.dumps(stored), ex=600)
+    params = httpx.QueryParams({
+        "client_id": settings.google_client_id, "response_type": "code", "scope": "openid email profile",
+        "redirect_uri": _google_redirect_uri(),
+        "state": state, "nonce": nonce, "code_challenge": _b64(hashlib.sha256(verifier.encode()).digest()),
+        "code_challenge_method": "S256", "prompt": "select_account"})
+    return f"{GOOGLE_AUTH}?{params}"
+
+
 @router.get("/google/start", dependencies=[Depends(auth_limit)])
 async def google_start() -> RedirectResponse:
     if not settings.google_client_id:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Google sign-in is not configured")
-    state, nonce, verifier = secrets.token_urlsafe(24), secrets.token_urlsafe(24), secrets.token_urlsafe(48)
-    await get_redis().set(f"oauth:google:{state}", json.dumps({"nonce": nonce, "verifier": verifier}), ex=600)
-    params = httpx.QueryParams({
-        "client_id": settings.google_client_id, "response_type": "code", "scope": "openid email profile",
-        "redirect_uri": f"{settings.public_api_url}{settings.api_prefix}/auth/google/callback",
-        "state": state, "nonce": nonce, "code_challenge": _b64(hashlib.sha256(verifier.encode()).digest()),
-        "code_challenge_method": "S256", "prompt": "select_account"})
-    return RedirectResponse(f"{GOOGLE_AUTH}?{params}", status_code=302)
+        # the browser navigated here from a button: send it back to a readable message, not a JSON error
+        return RedirectResponse(f"{settings.public_web_url}/login?error=google_unavailable", status_code=302)
+    return RedirectResponse(await google_authorize_url(), status_code=302)
 
 
 def _verify_google_id_token(token: str, nonce: str) -> dict:
@@ -178,29 +194,60 @@ def _verify_google_id_token(token: str, nonce: str) -> dict:
     return claims
 
 
-@router.get("/google/callback", dependencies=[Depends(auth_limit)])
-async def google_callback(request: Request, code: str = "", state: str = "",
-                          db: AsyncSession = Depends(get_db)) -> RedirectResponse:
-    import asyncio
-    fail = RedirectResponse(f"{settings.public_web_url}/login?error=google", status_code=302)
-    stored = await get_redis().getdel(f"oauth:google:{state}") if state else None
-    if not code or not stored:
-        return fail
-    data = json.loads(stored)
+async def _exchange_google_code(code: str, verifier: str) -> str | None:
+    """Swap the authorisation code for Google's ID token (None if Google refuses)."""
     async with httpx.AsyncClient(timeout=10) as client:
         r = await client.post(GOOGLE_TOKEN, data={
             "code": code, "client_id": settings.google_client_id,
             "client_secret": settings.google_client_secret.get_secret_value(),
-            "redirect_uri": f"{settings.public_api_url}{settings.api_prefix}/auth/google/callback",
-            "grant_type": "authorization_code", "code_verifier": data["verifier"]})
-    if r.status_code != 200 or "id_token" not in r.json():
+            "redirect_uri": _google_redirect_uri(),
+            "grant_type": "authorization_code", "code_verifier": verifier})
+    if r.status_code != 200:
+        return None
+    return r.json().get("id_token")
+
+
+def _web_redirect(path: str) -> RedirectResponse:
+    return RedirectResponse(f"{settings.public_web_url}{path}", status_code=302)
+
+
+async def _link_google(db: AsyncSession, request: Request, user_id: str, subject: str) -> RedirectResponse:
+    """Connect a Google account to the signed-in user who started the flow from their account page."""
+    user = await db.get(User, uuid.UUID(user_id))
+    if user is None or not user.is_active:
+        return _web_redirect("/login?error=google")
+    owner = (await db.execute(select(OAuthAccount.user_id).where(OAuthAccount.provider == "google",
+                                                                 OAuthAccount.subject == subject))).scalar_one_or_none()
+    if owner is not None and owner != user.id:
+        return _web_redirect("/account?google=in_use")
+    if owner is None:
+        db.add(OAuthAccount(user_id=user.id, provider="google", subject=subject))
+        await audit(db, "google_linked", request, user.id)
+        await db.commit()
+    return _web_redirect("/account?google=linked")
+
+
+@router.get("/google/callback", dependencies=[Depends(auth_limit)])
+async def google_callback(request: Request, code: str = "", state: str = "",
+                          db: AsyncSession = Depends(get_db)) -> RedirectResponse:
+    fail = _web_redirect("/login?error=google")
+    stored = await get_redis().getdel(f"oauth:google:{state}") if state else None
+    if not code or not stored:
+        return fail
+    data = json.loads(stored)
+    id_token = await _exchange_google_code(code, data["verifier"])
+    if id_token is None:
         return fail
     try:
-        claims = await asyncio.to_thread(_verify_google_id_token, r.json()["id_token"], data["nonce"])
+        claims = await asyncio.to_thread(_verify_google_id_token, id_token, data["nonce"])
     except jwt.PyJWTError:
         return fail
     if not claims.get("email_verified"):
         return fail
+    if data.get("link_user_id"):
+        return await _link_google(db, request, data["link_user_id"], claims["sub"])
+
+    # Sign in. One person = one account: a Google identity is found by its subject, otherwise by email.
     email = auth.normalise_email(claims["email"])
     link = (await db.execute(select(OAuthAccount).where(OAuthAccount.provider == "google",
                                                         OAuthAccount.subject == claims["sub"]))).scalar_one_or_none()
@@ -211,12 +258,18 @@ async def google_callback(request: Request, code: str = "", state: str = "",
             user = User(email=email, full_name=claims.get("name", "")[:120], password_hash=None)
             db.add(user)
             await db.flush()
+        elif user.email_verified_at is None and user.password_hash is not None:
+            # Nobody ever proved they own this address, so the password may belong to someone who registered it
+            # before its owner did. Google has just proved ownership: drop that password and its sessions.
+            user.password_hash = None
+            await auth.revoke_all_sessions(db, user.id)
+            await audit(db, "unverified_password_removed_on_google_link", request, user.id)
         db.add(OAuthAccount(user_id=user.id, provider="google", subject=claims["sub"]))
+        await audit(db, "google_linked", request, user.id)
     if not user.is_active:
         return fail
     user.email_verified_at = user.email_verified_at or datetime.now(UTC)
     await audit(db, "login_google", request, user.id)
-    target = "/dashboard" if user.age_confirmed_at else "/onboarding"
-    response = RedirectResponse(f"{settings.public_web_url}{target}", status_code=302)
+    response = _web_redirect("/dashboard" if user.age_confirmed_at else "/onboarding")
     await auth.issue_session(db, request, response, user)
     return response

@@ -6,7 +6,7 @@ import { nav, site } from "@/lib/site";
 export function Logo() {
   return (
     <Link href="/" className="flex items-center gap-2 font-bold tracking-tight" aria-label={`${site.name} home`}>
-      <span className="grid h-8 w-8 place-items-center rounded-lg bg-brand text-sm text-brand-fg">AP</span>
+      <span className="grid h-8 w-8 place-items-center rounded-sm bg-brand text-sm text-brand-fg">AP</span>
       <span>{site.name}</span>
     </Link>
   );
@@ -38,7 +38,7 @@ export function SiteHeader() {
 export function SiteFooter() {
   const year = new Date().getFullYear();
   return (
-    <footer className="mt-24 border-t border-border py-10 text-sm text-muted">
+    <footer className="border-t border-border py-10 text-sm text-muted">
       <Container className="grid gap-8 md:grid-cols-4">
         <div className="space-y-3 md:col-span-2">
           <Logo />
