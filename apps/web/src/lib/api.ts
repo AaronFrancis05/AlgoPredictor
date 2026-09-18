@@ -51,6 +51,9 @@ function messageFrom(detail: unknown, status: number): string {
       age_not_confirmed: "Please confirm you are 18 or older.",
       slip_quota: "You have used today's slip allowance.",
       verify_first: "Confirm your email and age before subscribing.",
+      admin_full_access: "Admin accounts already have every feature. There is nothing to pay.",
+      plan_already_covered:
+        "Your current plan already includes everything this code gives, so it was not used. Keep it for later or pass it on.",
     };
     return known[code] ?? code;
   }

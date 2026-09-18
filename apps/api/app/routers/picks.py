@@ -38,7 +38,7 @@ async def picks_for_day(response: Response, day: date | None = Query(default=Non
     items, hidden = ps.apply_plan(rows, plan, datetime.now(UTC), signed_in=user is not None)
     response.headers["Cache-Control"] = "private, max-age=60" if user else "public, max-age=60"
     return PicksDayOut(date=day, plan=plan.code, picks=items, total_published=len(rows), hidden_count=hidden,
-                       tier_hit_rates=settings.tier_hit_rates, tier_hit_rates_source=settings.tier_hit_rates_source,
+                       tier_hit_rates=settings.tier_hit_rates, tier_hit_rates_source=settings.tier_hit_rates_label,
                        disclaimer=ps.DISCLAIMER)
 
 
@@ -53,7 +53,7 @@ async def top_picks(day: date | None = Query(default=None, alias="date"), n: int
     top = products.top_n([ps.to_leg(r) for r in rows], day, n)
     return PicksDayOut(date=day, plan=plan.code, picks=[ps.serialise(by_id[x.prediction_id], plan) for x in top],
                        total_published=len(rows), hidden_count=0, tier_hit_rates=settings.tier_hit_rates,
-                       tier_hit_rates_source=settings.tier_hit_rates_source, disclaimer=ps.DISCLAIMER)
+                       tier_hit_rates_source=settings.tier_hit_rates_label, disclaimer=ps.DISCLAIMER)
 
 
 @router.post("/slips", response_model=SlipOut)
@@ -112,16 +112,16 @@ async def jackpot(week_of: date | None = None, user: User = Depends(verified_adu
 
 @router.get("/track-record", response_model=TrackRecordOut)
 async def track_record(response: Response, db: AsyncSession = Depends(get_db)) -> TrackRecordOut:
-    """Public, graded history of live predictions plus the walk-forward backtest summary."""
+    """Public, graded history of live predictions plus the historical hit rate per tier. Internal model
+    metrics (RPS, model name, test method) are deliberately left out of this public payload."""
     tr = await ps.track_record(db)
     # finished matches are public in full; VALUE flags stay a paid feature
     public_view = Plan(code="public", name="", rank=0, entitlements={"value_flags": False})
     response.headers["Cache-Control"] = "public, max-age=300"
     return TrackRecordOut(
-        graded=tr["graded"], hit_rate=tr["hit_rate"], mean_rps=tr["mean_rps"], by_tier=tr["by_tier"],
-        by_month=tr["by_month"], recent=[ps.serialise(r, public_view) for r in tr["recent"]],
+        graded=tr["graded"], hit_rate=tr["hit_rate"], by_tier=tr["by_tier"],
+        by_month=[{k: v for k, v in m.items() if k != "mean_rps"} for m in tr["by_month"]],
+        recent=[ps.serialise(r, public_view) for r in tr["recent"]],
         live_since=tr["live_since"],
-        backtest=dict(source=settings.tier_hit_rates_source, tier_hit_rates=settings.tier_hit_rates,
-                      model_rps=settings.backtest_model_rps, bookmaker_rps=settings.backtest_bookmaker_rps,
-                      note="Out-of-sample walk-forward test on 2021/22-2025/26 main-league matches; "
-                           "past performance does not guarantee future results."))
+        backtest=dict(matches=settings.backtest_matches, tier_hit_rates=settings.tier_hit_rates,
+                      note="Results on past matches. Past performance does not guarantee future results."))

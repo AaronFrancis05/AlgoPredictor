@@ -27,7 +27,8 @@ const docs = {
       ["Why", "To run your account, provide the plan you pay for, prevent fraud and abuse, and meet legal obligations."],
       ["Cookies", "Strictly necessary cookies only: a short-lived session cookie, a refresh cookie and a CSRF-protection cookie. No advertising trackers."],
       ["Your rights", "You can download all data we hold about you and delete your account at any time from the Account page."],
-      ["Retention", "Account data is deleted when you delete your account. Payment records are kept (without your identity) where accounting law requires."],
+      // keep the period in step with ACCOUNT_RETENTION_DAYS on the API
+      ["Retention", "When you close your account it is disabled at once: you are signed out everywhere and no one can sign in to it. We keep the account data for 30 days for legal and record-keeping purposes (and so it can be restored if you ask), then erase it permanently. Payment records are kept without your identity for as long as accounting and tax law requires."],
       ["Contact", `Questions: ${site.supportEmail}`],
     ],
   },

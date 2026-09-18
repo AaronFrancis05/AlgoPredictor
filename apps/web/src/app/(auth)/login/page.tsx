@@ -12,5 +12,9 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
     google_unavailable: "Google sign-in is not available yet. Please use your email and password.",
   };
   const error = typeof sp.error === "string" ? (errors[sp.error] ?? null) : null;
-  return <LoginForm next={next} initialError={error} />;
+  const notices: Record<string, string> = {
+    account_closed: "Your account is closed and you have been signed out on every device.",
+  };
+  const notice = typeof sp.notice === "string" ? (notices[sp.notice] ?? null) : null;
+  return <LoginForm next={next} initialError={error} notice={notice} />;
 }

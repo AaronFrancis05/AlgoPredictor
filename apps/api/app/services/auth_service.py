@@ -78,7 +78,10 @@ async def authenticate(db: AsyncSession, request: Request, email: str, password:
         await db.commit()
         raise generic
     if not user.is_active:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Account disabled")
+        # only reached with the right password, so this reveals nothing to someone guessing addresses
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "This account is closed. Contact support if you want it restored before it is erased."
+                            if user.deleted_at else "Account disabled")
     user.failed_logins, user.locked_until = 0, None
     if needs_rehash(user.password_hash):
         user.password_hash = hash_password(password)

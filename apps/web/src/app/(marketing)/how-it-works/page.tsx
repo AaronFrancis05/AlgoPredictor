@@ -5,21 +5,21 @@ import { ButtonLink, Container, PageHeader } from "@/components/ui";
 
 export const metadata: Metadata = {
   title: "How it works",
-  description: "How AlgoPredict's football model works: data, training, weekly retraining, confidence tiers, the target-odds slip builder and the weekly jackpot.",
+  description: "How AlgoPredict works: a probability for every fixture, confidence tiers, a public track record, the target-odds slip builder and the weekly jackpot.",
   alternates: { canonical: "/how-it-works" },
 };
 
 const steps = [
-  { t: "1. Data", d: "Two decades of results, shots, form, rest days, head-to-head records, club strength ratings and pre-match odds across 22 European leagues." },
-  { t: "2. Model", d: "Gradient-boosted trees (CatBoost/LightGBM) estimate the probability of a home win, draw and away win for every fixture. Hyper-parameters are tuned on a season the model never evaluates on." },
-  { t: "3. Honest testing", d: "Walk-forward validation: the model is trained only on the past and tested on the next season, five seasons in a row, 38,732 matches it had never seen." },
-  { t: "4. Weekly learning", d: "After every round, predictions are graded against real results. A retrained challenger replaces the current model only if it scores better on matches neither has seen." },
+  { t: "1. Every fixture is rated", d: "Our own machine-learning model gives each match a probability for a home win, a draw and an away win." },
+  { t: "2. One clear pick", d: "The pick is the outcome with the highest probability, with a confidence tier so you can see at a glance how sure the model is." },
+  { t: "3. Checked against the result", d: "After the final whistle every published pick is graded and added to the public track record. Nothing is edited or deleted." },
+  { t: "4. Always improving", d: "The model is updated regularly, and a new version only goes live when it performs better than the current one." },
 ];
 
 export default function HowItWorks() {
   return (
     <Container className="space-y-12 py-16">
-      <PageHeader title="How it works" subtitle="From historical data to a probability for tonight's match." />
+      <PageHeader title="How it works" subtitle="A probability for every match, one clear pick, and a record you can check." />
       <ol className="grid gap-x-10 md:grid-cols-2">
         {steps.map((s) => (
           <li key={s.t} className="border-t border-border py-6">

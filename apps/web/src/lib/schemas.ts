@@ -70,14 +70,13 @@ export type Jackpot = z.infer<typeof Jackpot>;
 export const TrackRecord = z.object({
   graded: z.number(),
   hit_rate: z.number().nullable(),
-  mean_rps: z.number().nullable(),
   by_tier: z.array(z.object({ tier: z.string(), graded: z.number(), hit_rate: z.number(),
                               avg_confidence: z.number() })),
-  by_month: z.array(z.object({ month: z.string(), graded: z.number(), hit_rate: z.number(), mean_rps: z.number() })),
+  by_month: z.array(z.object({ month: z.string(), graded: z.number(), hit_rate: z.number() })),
   recent: z.array(Pick),
   live_since: z.string().nullable(),
-  backtest: z.object({ source: z.string(), tier_hit_rates: z.record(z.string(), z.number()),
-                       model_rps: z.number(), bookmaker_rps: z.number(), note: z.string() }),
+  backtest: z.object({ matches: z.number().optional(), tier_hit_rates: z.record(z.string(), z.number()),
+                       note: z.string() }),
 });
 export type TrackRecord = z.infer<typeof TrackRecord>;
 
@@ -112,11 +111,15 @@ export const User = z.object({
   email_verified: z.boolean(),
   age_confirmed: z.boolean(),
   is_admin: z.boolean(),
+  role: z.string().optional(),
   plan: z.string(),
   entitlements: Entitlements,
   has_api_key: z.boolean(),
   has_password: z.boolean(),
   google_linked: z.boolean(),
+  // optional so the site keeps working against an API deployed before these fields existed
+  created_at: z.string().nullable().optional(),
+  account_retention_days: z.number().optional(),
 });
 export type User = z.infer<typeof User>;
 
@@ -127,6 +130,22 @@ export const Subscription = z.object({
   plan_code: z.string(), provider: z.string(), status: z.string(), current_period_end: z.string().nullable(),
   cancel_at_period_end: z.boolean(),
 });
+
+export const AccessToken = z.object({
+  id: z.string(),
+  code_hint: z.string(),
+  plan_code: z.string(),
+  expires_at: z.string(),
+  max_redemptions: z.number().nullable(),
+  redemptions: z.number(),
+  note: z.string(),
+  status: z.enum(["active", "expired", "used_up", "revoked"]),
+  created_at: z.string(),
+  revoked_at: z.string().nullable(),
+  redeemed_by: z.array(z.object({ email: z.string(), redeemed_at: z.string(), status: z.string() })),
+});
+export type AccessToken = z.infer<typeof AccessToken>;
+export const AccessTokenCreated = AccessToken.extend({ code: z.string() });
 
 // ------------------------------------------------------------------ forms
 const password = z

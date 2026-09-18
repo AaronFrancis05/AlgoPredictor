@@ -6,8 +6,12 @@ from fastapi import Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.cache import cached, invalidate
+from app.core.logging import get_logger
 from app.db.session import get_db
-from app.models import Plan, Subscription, User
+from app.models import ROLE_ADMIN, Plan, Subscription, User
+
+log = get_logger(__name__)
 
 ACTIVE_STATUSES = ("active", "trialing")
 
@@ -44,20 +48,56 @@ def major_units(amount_minor: int, currency: str) -> float:
     return amount_minor if currency in ZERO_DECIMAL_CURRENCIES else amount_minor / 100
 
 
-async def active_plan(db: AsyncSession, user_id: UUID | None) -> Plan:
-    if user_id is not None:
+PLANS_CACHE_NS = "plans"         # the plan catalogue (rarely edited)
+USER_PLAN_CACHE_NS = "user_plan"  # plan code per user; cleared whenever a billing event is applied
+USER_PLAN_TTL = 60
+
+
+async def _catalogue(db: AsyncSession) -> dict[str, dict]:
+    async def load() -> dict[str, dict]:
+        rows = (await db.execute(select(Plan))).scalars().all()
+        return {p.code: dict(code=p.code, name=p.name, rank=p.rank, description=p.description,
+                             entitlements=p.entitlements, is_active=p.is_active) for p in rows}
+
+    return await cached(PLANS_CACHE_NS, "all", 300, load)
+
+
+async def _user_plan_code(db: AsyncSession, user_id: UUID) -> str:
+    async def load() -> str:
+        role = (await db.execute(select(User.role).where(User.id == user_id))).scalar_one_or_none()
+        if role == ROLE_ADMIN:  # admins have every feature and never pay: the highest active plan
+            top = (await db.execute(select(Plan.code).where(Plan.is_active.is_(True))
+                                    .order_by(Plan.rank.desc()).limit(1))).scalar_one_or_none()
+            if top:
+                return top
         now = datetime.now(UTC)
-        rows = (await db.execute(
-            select(Plan).join(Subscription, Subscription.plan_code == Plan.code)
+        code = (await db.execute(
+            select(Plan.code).join(Subscription, Subscription.plan_code == Plan.code)
             .where(Subscription.user_id == user_id, Subscription.status.in_(ACTIVE_STATUSES))
             .where((Subscription.current_period_end.is_(None)) | (Subscription.current_period_end > now))
-            .order_by(Plan.rank.desc()))).scalars().first()
-        if rows is not None:
-            return rows
-    free = await db.get(Plan, "free")
-    if free is None:
+            .order_by(Plan.rank.desc()).limit(1))).scalars().first()
+        return code or "free"
+
+    return await cached(USER_PLAN_CACHE_NS, str(user_id), USER_PLAN_TTL, load)
+
+
+async def active_plan(db: AsyncSession, user_id: UUID | None) -> Plan:
+    """The user's best active plan. Returned as a detached Plan built from cached data: read it, never add it
+    to a session. A subscription change reaches every request within USER_PLAN_TTL seconds, or at once when
+    the billing code calls forget_user_plans()."""
+    catalogue = await _catalogue(db)
+    code = await _user_plan_code(db, user_id) if user_id is not None else "free"
+    data = catalogue.get(code) or catalogue.get("free")
+    if data is None:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Plans are not configured")
-    return free
+    return Plan(**data)
+
+
+async def forget_user_plans() -> None:
+    try:
+        await invalidate(USER_PLAN_CACHE_NS)
+    except Exception as e:  # the TTL still bounds staleness if Redis is down
+        log.warning("user_plan_invalidate_failed", error=str(e))
 
 
 def allows(plan: Plan, feature: str) -> bool:

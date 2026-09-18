@@ -123,6 +123,56 @@ export function EmptyState({ title, children }: { title: string; children?: Reac
   );
 }
 
+export function Skeleton({ className }: { className?: string }) {
+  return <div aria-hidden className={cn("animate-pulse rounded-sm bg-surface-2", className)} />;
+}
+
+/** A row of mutually exclusive options (square segments, not pills). */
+export function Segmented<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: { value: T; label: ReactNode; title?: string }[];
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} className="inline-flex rounded-md border border-border bg-surface p-0.5">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          role="radio"
+          aria-checked={value === o.value}
+          title={o.title}
+          onClick={() => onChange(o.value)}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-sm px-2.5 py-1.5 text-xs font-medium transition-colors",
+            value === o.value ? "bg-surface-2 text-fg" : "text-muted hover:text-fg",
+          )}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function Select({ className, ...props }: ComponentProps<"select">) {
+  return (
+    <select
+      className={cn(
+        "rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs font-medium text-fg focus:border-accent focus:outline-none",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
 export function Spinner({ label = "Loading" }: { label?: string }) {
   return (
     <div role="status" aria-live="polite" className="flex items-center gap-2 py-10 text-sm text-muted">

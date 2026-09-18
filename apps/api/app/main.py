@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 
@@ -44,6 +45,8 @@ def create_app() -> FastAPI:
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=s.trusted_hosts)
     app.add_middleware(SecurityHeadersMiddleware, hsts=s.is_production)
     app.add_middleware(RequestContextMiddleware)
+    # pick lists are repetitive JSON: gzip cuts them several-fold for mobile connections
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
 
     default_limit = rate_limit("default", s.rate_limit_default)
     from fastapi import Depends

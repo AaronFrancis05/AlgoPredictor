@@ -12,7 +12,9 @@ import { Alert, Button, Field, Input } from "@/components/ui";
 import { api } from "@/lib/api";
 import { AuthResult, LoginForm as LoginSchema, type LoginForm as LoginValues } from "@/lib/schemas";
 
-export function LoginForm({ next, initialError }: { next: string; initialError: string | null }) {
+export function LoginForm({ next, initialError, notice = null }: {
+  next: string; initialError: string | null; notice?: string | null;
+}) {
   const router = useRouter();
   const qc = useQueryClient();
   const [error, setError] = useState<string | null>(initialError);
@@ -42,6 +44,7 @@ export function LoginForm({ next, initialError }: { next: string; initialError: 
           New here? <Link className="text-fg underline underline-offset-4" href="/register">Create a free account</Link>
         </p>
       </div>
+      {notice && !error ? <Alert tone="success">{notice}</Alert> : null}
       {error ? <Alert tone="error">{error}</Alert> : null}
       <GoogleButton />
       <OrDivider label="or sign in with email" />

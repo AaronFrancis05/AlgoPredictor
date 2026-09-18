@@ -61,14 +61,10 @@ export function SignInMethods({ user }: { user: User }) {
   }
 
   return (
-    <Card className="space-y-4">
-      <div>
-        <h2 className="font-semibold">Sign-in methods</h2>
-        <p className="mt-1 text-sm text-muted">Both methods open the same account, with the same plan and history.</p>
-      </div>
-      {notice ? <Alert tone={notice.tone}>{notice.text}</Alert> : null}
+    <Card className="p-0">
+      {notice ? <div className="px-5 pt-4"><Alert tone={notice.tone}>{notice.text}</Alert></div> : null}
 
-      <div className="divide-y divide-border border-y border-border">
+      <div className="divide-y divide-border px-5">
         <div className="flex flex-wrap items-center justify-between gap-3 py-3">
           <div>
             <p className="text-sm font-medium">Email and password</p>
@@ -127,7 +123,7 @@ export function SignInMethods({ user }: { user: User }) {
         </div>
       </div>
       {user.google_linked && !user.has_password ? (
-        <p className="text-xs text-muted">Add a password before disconnecting Google, so you can still sign in.</p>
+        <p className="border-t border-border px-5 py-3 text-xs text-muted">Add a password before disconnecting Google, so you can still sign in.</p>
       ) : null}
     </Card>
   );

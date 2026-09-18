@@ -146,4 +146,7 @@ async def test_results_ingest_feeds_track_record(client):
     r = await client.post("/internal/ingest/results", content=raw, headers=headers)
     assert r.json()["inserted"] == 4
     tr = (await client.get("/api/v1/track-record")).json()
-    assert tr["graded"] >= 4 and tr["backtest"]["bookmaker_rps"] > 0
+    assert tr["graded"] >= 4 and tr["backtest"]["matches"] > 0
+    # internal model metrics never reach the public payload
+    assert "mean_rps" not in tr and not {"source", "model_rps", "bookmaker_rps"} & tr["backtest"].keys()
+    assert all("mean_rps" not in m for m in tr["by_month"])

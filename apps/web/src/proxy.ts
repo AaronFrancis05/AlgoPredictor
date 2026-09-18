@@ -7,7 +7,7 @@ import { NextResponse, type NextRequest } from "next/server";
  *    call itself (401 -> refresh -> login), so this is only a fast path, never the security boundary;
  * 3. /api/v1 calls (rewritten to FastAPI) get the visitor's IP in X-Client-IP, signed with PROXY_SHARED_SECRET.
  */
-const APP_PREFIXES = ["/dashboard", "/top-picks", "/slip-builder", "/jackpot", "/account", "/onboarding"];
+const APP_PREFIXES = ["/dashboard", "/top-picks", "/slip-builder", "/jackpot", "/account", "/onboarding", "/admin"];
 
 /**
  * The visitor's IP as seen by the load balancer in front of this server. Each trusted hop appends the address it
