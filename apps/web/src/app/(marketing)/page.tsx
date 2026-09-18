@@ -3,6 +3,7 @@ import { connection } from "next/server";
 
 import { JsonLd } from "@/components/json-ld";
 import { Disclaimer } from "@/components/picks";
+import { SessionCta } from "@/components/session-actions";
 import { ButtonLink, Container } from "@/components/ui";
 import { pct } from "@/lib/format";
 import { TrackRecord } from "@/lib/schemas";
@@ -65,7 +66,7 @@ export default async function Home() {
               want, and check every past pick against the result.
             </p>
             <div className="mt-9 flex flex-wrap gap-3">
-              <ButtonLink href="/register">Get today&apos;s free picks</ButtonLink>
+              <SessionCta signedOutHref="/register" signedOut={<>Get today&apos;s free picks</>} />
               <ButtonLink href="/track-record" variant="secondary">See the track record</ButtonLink>
             </div>
           </div>

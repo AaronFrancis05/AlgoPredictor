@@ -131,6 +131,16 @@ class ApiKeyOut(BaseModel):
 
 # ---------------------------------------------------------------- picks
 PickSide = Literal["home", "draw", "away"]
+MatchPhase = Literal["upcoming", "live", "finished", "awaiting_result", "postponed", "cancelled", "abandoned"]
+
+
+class LiveOut(BaseModel):
+    """Score and status from the live-score feed (display only; the official result comes from grading)."""
+    status: str                      # feed code: 1H, HT, 2H, ET, P, FT, AET, PEN, ...
+    elapsed: int | None
+    home_goals: int | None
+    away_goals: int | None
+    updated_at: datetime | None
 
 
 class PickOut(BaseModel):
@@ -157,6 +167,11 @@ class PickOut(BaseModel):
     model_version: str
     result: PickSide | None = None
     correct: bool | None = None
+    phase: MatchPhase = "upcoming"
+    live: LiveOut | None = None
+    # won/lost: from the official grading when outcome_official, otherwise from the feed's full-time score
+    outcome: Literal["won", "lost"] | None = None
+    outcome_official: bool = False
 
 
 class PicksDayOut(BaseModel):
@@ -167,6 +182,36 @@ class PicksDayOut(BaseModel):
     hidden_count: int
     tier_hit_rates: dict[str, float]
     tier_hit_rates_source: str
+    disclaimer: str
+
+
+class LivePicksOut(BaseModel):
+    plan: str
+    picks: list[PickOut]
+    feed: bool                       # is a live-score feed configured
+    disclaimer: str
+
+
+class HistorySummary(BaseModel):
+    matches: int
+    won: int
+    lost: int
+    pending: int                     # finished, result not known yet
+    void: int                        # postponed / cancelled / abandoned
+    hit_rate: float | None           # won / (won + lost)
+    provisional: int                 # outcomes taken from the feed, not yet officially graded
+
+
+class HistoryOut(BaseModel):
+    date_from: date
+    date_to: date
+    page: int
+    page_size: int
+    total: int
+    summary: HistorySummary
+    by_tier: list[dict]
+    leagues: list[str]
+    picks: list[PickOut]
     disclaimer: str
 
 
@@ -308,6 +353,11 @@ class AccessTokenCreatedOut(AccessTokenOut):
 
 class RedeemIn(BaseModel):
     code: str = Field(min_length=8, max_length=40)
+
+
+class LiveLinkIn(BaseModel):
+    match_key: str = Field(min_length=12, max_length=200)
+    fixture_id: int | None = Field(default=None, ge=1)   # None = unlink
 
 
 class RoleIn(BaseModel):
