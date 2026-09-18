@@ -7,7 +7,7 @@ from app.core.config import get_settings
 from app.core.ratelimit import rate_limit
 from app.core.security import hash_password, new_opaque_token, token_digest, verify_password
 from app.db.session import get_db
-from app.deps import current_user, verified_adult
+from app.deps import current_user, forget_viewer, verified_adult
 from app.models import AuditLog, OAuthAccount, Payment, Slip, Subscription, User
 from app.routers.auth import google_authorize_url
 from app.schemas import ApiKeyOut, GoogleLinkOut, Message, PasswordSetIn, RedeemIn, UserOut
@@ -128,6 +128,7 @@ async def delete_account(request: Request, response: Response, user: User = Depe
     await auth.revoke_all_sessions(db, user.id)
     await audit(db, "account_closed", request, user.id, erase_after=erase_on.isoformat())
     await db.commit()
+    await forget_viewer(user.id)
     auth.clear_session(response)
     days = settings.account_retention_days
     when = f"on {erase_on:%d %B %Y}" if days else "now"

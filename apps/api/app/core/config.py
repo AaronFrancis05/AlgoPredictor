@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     # Supabase: postgresql+asyncpg://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres
     db_ssl: Literal["disable", "require", "verify-full"] = "disable"
     db_transaction_pooler: bool = False   # True for the Supabase transaction pooler (port 6543)
+    # Per process (each uvicorn worker and the arq worker has its own pool). Total = processes x (size + overflow)
+    # must stay under the database / session pooler's connection limit. Ignored with the transaction pooler.
+    db_pool_size: int = Field(default=5, ge=1, le=50)
+    db_max_overflow: int = Field(default=5, ge=0, le=50)
     # Upstash: rediss://default:<password>@<name>.upstash.io:6379  (rediss = TLS; Upstash has database 0 only)
     redis_url: str = "redis://localhost:6379/0"
     redis_timeout_seconds: float = 5.0

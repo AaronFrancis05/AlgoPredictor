@@ -12,6 +12,7 @@ from app.core.logging import configure_logging
 from app.core.middleware import (
     BodySizeLimitMiddleware,
     CSRFMiddleware,
+    ETagMiddleware,
     RequestContextMiddleware,
     SecurityHeadersMiddleware,
 )
@@ -45,6 +46,8 @@ def create_app() -> FastAPI:
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=s.trusted_hosts)
     app.add_middleware(SecurityHeadersMiddleware, hsts=s.is_production)
     app.add_middleware(RequestContextMiddleware)
+    # polled pick lists rarely change: unchanged polls get 304 (inside GZip, so the tag hashes plain JSON)
+    app.add_middleware(ETagMiddleware, prefix=s.api_prefix)
     # pick lists are repetitive JSON: gzip cuts them several-fold for mobile connections
     app.add_middleware(GZipMiddleware, minimum_size=1024)
 

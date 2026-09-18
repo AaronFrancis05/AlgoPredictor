@@ -20,7 +20,7 @@ from app.core.ratelimit import rate_limit
 from app.core.redis import get_redis
 from app.core.security import hash_password
 from app.db.session import get_db
-from app.deps import REFRESH_COOKIE, current_user
+from app.deps import REFRESH_COOKIE, current_user, forget_viewer
 from app.models import OAuthAccount, User
 from app.schemas import AgeConfirmIn, AuthOut, EmailIn, LoginIn, Message, PasswordResetIn, RegisterIn, TokenIn, UserOut
 from app.services import auth_service as auth
@@ -76,6 +76,7 @@ async def verify_email(body: TokenIn, request: Request, db: AsyncSession = Depen
     user.email_verified_at = user.email_verified_at or datetime.now(UTC)
     await audit(db, "email_verified", request, user.id)
     await db.commit()
+    await forget_viewer(user.id)
     return Message(message="Email confirmed. You can sign in now.")
 
 
@@ -140,6 +141,7 @@ async def reset_password(body: PasswordResetIn, request: Request, response: Resp
     await auth.revoke_all_sessions(db, user.id)
     await audit(db, "password_reset", request, user.id)
     await db.commit()
+    await forget_viewer(user.id)
     auth.clear_session(response)
     return Message(message="Password changed. Sign in with your new password.")
 
@@ -150,6 +152,7 @@ async def confirm_age(body: AgeConfirmIn, request: Request, user: User = Depends
     user.age_confirmed_at = user.age_confirmed_at or datetime.now(UTC)
     await audit(db, "age_confirmed", request, user.id)
     await db.commit()
+    await forget_viewer(user.id)
     return await user_out(db, user)
 
 
@@ -282,4 +285,5 @@ async def google_callback(request: Request, code: str = "", state: str = "",
     await audit(db, "login_google", request, user.id)
     response = _web_redirect("/dashboard" if user.age_confirmed_at else "/onboarding")
     await auth.issue_session(db, request, response, user)
+    await forget_viewer(user.id)
     return response

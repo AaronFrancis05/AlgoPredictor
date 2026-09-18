@@ -11,22 +11,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.ratelimit import rate_limit
 from app.db.session import get_db
-from app.deps import optional_user, verified_adult
-from app.models import Plan, Slip, User
+from app.deps import Viewer, optional_viewer, verified_viewer
+from app.models import Plan, Slip
 from app.schemas import (
     HistoryOut,
     HistorySummary,
     JackpotDayOut,
     JackpotOut,
     LivePicksOut,
-    PickOut,
     PicksDayOut,
     SlipIn,
     SlipOut,
     TrackRecordOut,
 )
+from app.services import livescores, products
 from app.services import picks_service as ps
-from app.services import products
 from app.services.entitlements import active_plan, require_entitlement
 
 settings = get_settings()
@@ -42,15 +41,16 @@ def _today() -> date:
     return datetime.now(UTC).date()
 
 
-async def _viewer_plan(db: AsyncSession, user: User | None) -> tuple[User | None, Plan]:
-    if user is not None and (user.email_verified_at is None or user.age_confirmed_at is None):
+async def _viewer_plan(db: AsyncSession, user: Viewer | None) -> tuple[Viewer | None, Plan]:
+    if user is not None and not user.verified_adult:
         user = None  # unverified accounts get the anonymous view
     return user, await active_plan(db, user.id if user else None)
 
 
 @router.get("/picks", response_model=PicksDayOut, dependencies=[Depends(product_limit)])
 async def picks_for_day(response: Response, day: date | None = Query(default=None, alias="date"),
-                        user: User | None = Depends(optional_user), db: AsyncSession = Depends(get_db)) -> PicksDayOut:
+                        user: Viewer | None = Depends(optional_viewer),
+                        db: AsyncSession = Depends(get_db)) -> PicksDayOut:
     """Picks for one day. Signed-out visitors see every pick locked; the Free plan sees its free allocation and
     paid plans see everything their entitlements allow."""
     day = day or _today()
@@ -66,7 +66,7 @@ async def picks_for_day(response: Response, day: date | None = Query(default=Non
 
 
 @router.get("/picks/live", response_model=LivePicksOut, dependencies=[Depends(product_limit)])
-async def live_picks(response: Response, user: User | None = Depends(optional_user),
+async def live_picks(response: Response, user: Viewer | None = Depends(optional_viewer),
                      db: AsyncSession = Depends(get_db)) -> LivePicksOut:
     """Matches in play now, with the live score when the feed has it. Picks follow the same plan rules as /picks
     (a locked pick stays locked until the result is in)."""
@@ -78,23 +78,28 @@ async def live_picks(response: Response, user: User | None = Depends(optional_us
     items = await ps.with_status(db, ps.apply_plan_by_day(rows, plan, now, signed_in=user is not None), now)
     live = sorted((p for p in items if p.phase == "live"), key=lambda p: (p.kickoff_at, p.home_team))
     response.headers["Cache-Control"] = "private, max-age=15" if user else "public, max-age=15"
-    return LivePicksOut(plan=plan.code, picks=live, feed=bool(settings.api_football_key.get_secret_value()),
-                        disclaimer=ps.DISCLAIMER)
+    feed = bool(settings.api_football_key.get_secret_value())
+    try:
+        next_update = await livescores.next_update_at(now) if feed and live else None
+    except Exception:  # a hint only: Redis trouble must not fail the page
+        next_update = None
+    return LivePicksOut(plan=plan.code, picks=live, feed=feed, next_update_at=next_update, disclaimer=ps.DISCLAIMER)
 
 
-def _summary(picks: list[PickOut]) -> tuple[HistorySummary, list[dict]]:
-    won = sum(p.outcome == "won" for p in picks)
-    lost = sum(p.outcome == "lost" for p in picks)
-    void = sum(p.phase in VOID_PHASES for p in picks)
+def _summary(rows: list[tuple[dict, tuple]]) -> tuple[HistorySummary, list[dict]]:
+    """rows: (pick dict, (phase, feed state, outcome, official)) of the played matches."""
+    won = sum(s[2] == "won" for _, s in rows)
+    lost = sum(s[2] == "lost" for _, s in rows)
+    void = sum(s[0] in VOID_PHASES for _, s in rows)
     tiers = []
     for t in ("Strong", "Medium", "Lean"):
-        w = sum(p.outcome == "won" and p.tier == t for p in picks)
-        n = w + sum(p.outcome == "lost" and p.tier == t for p in picks)
+        w = sum(s[2] == "won" and d["tier"] == t for d, s in rows)
+        n = w + sum(s[2] == "lost" and d["tier"] == t for d, s in rows)
         tiers.append(dict(tier=t, settled=n, won=w, hit_rate=w / n if n else None))
-    return HistorySummary(matches=len(picks), won=won, lost=lost, void=void,
-                          pending=len(picks) - won - lost - void,
+    return HistorySummary(matches=len(rows), won=won, lost=lost, void=void,
+                          pending=len(rows) - won - lost - void,
                           hit_rate=won / (won + lost) if won + lost else None,
-                          provisional=sum(p.outcome is not None and not p.outcome_official for p in picks)), tiers
+                          provisional=sum(s[2] is not None and not s[3] for _, s in rows)), tiers
 
 
 @router.get("/picks/history", response_model=HistoryOut)
@@ -103,7 +108,7 @@ async def history(response: Response, date_from: date | None = None, date_to: da
                   tier: Literal["Strong", "Medium", "Lean"] | None = None,
                   outcome: Literal["won", "lost", "pending"] | None = None,
                   page: int = Query(default=1, ge=1), page_size: int = Query(default=50, ge=10, le=200),
-                  user: User = Depends(verified_adult), _rl: None = Depends(product_limit),
+                  user: Viewer = Depends(verified_viewer), _rl: None = Depends(product_limit),
                   db: AsyncSession = Depends(get_db)) -> HistoryOut:
     """Matches that have been played (or called off), newest first. Every pick is shown: the match is over."""
     now = datetime.now(UTC)
@@ -114,25 +119,27 @@ async def history(response: Response, date_from: date | None = None, date_to: da
     plan = await active_plan(db, user.id)
     rows = [r for r in await ps.picks_between(db, start, end)
             if datetime.fromisoformat(r["kickoff_at"]) <= now]
-    items = await ps.with_status(db, [ps.serialise(r, plan) for r in rows], now)
-    done = [p for p in items if p.phase in HISTORY_PHASES]
-    leagues = sorted({p.league_code for p in done})
-    done = [p for p in done if (not league or p.league_code == league) and (not tier or p.tier == tier)]
+    # phase and outcome on the plain dicts; only the requested page is serialised
+    states = await ps.states_for(db, [r["kickoff_date"] for r in rows])
+    done = [(r, s) for r in rows if (s := ps.status_of(r, states, now))[0] in HISTORY_PHASES]
+    leagues = sorted({r["league_code"] for r, _ in done})
+    done = [(r, s) for r, s in done if (not league or r["league_code"] == league) and (not tier or r["tier"] == tier)]
     summary, by_tier = _summary(done)
     if outcome == "pending":
-        done = [p for p in done if p.outcome is None and p.phase not in VOID_PHASES]
+        done = [(r, s) for r, s in done if s[2] is None and s[0] not in VOID_PHASES]
     elif outcome:
-        done = [p for p in done if p.outcome == outcome]
-    done.sort(key=lambda p: (p.kickoff_at, p.home_team), reverse=True)
+        done = [(r, s) for r, s in done if s[2] == outcome]
+    done.sort(key=lambda x: (x[0]["kickoff_at"], x[0]["home_team"]), reverse=True)
+    page_rows = [r for r, _ in done[(page - 1) * page_size: page * page_size]]
+    items = await ps.with_status(db, [ps.serialise(r, plan) for r in page_rows], now)
     response.headers["Cache-Control"] = "private, max-age=60"
     return HistoryOut(date_from=start, date_to=end, page=page, page_size=page_size, total=len(done),
-                      summary=summary, by_tier=by_tier, leagues=leagues,
-                      picks=done[(page - 1) * page_size: page * page_size], disclaimer=ps.DISCLAIMER)
+                      summary=summary, by_tier=by_tier, leagues=leagues, picks=items, disclaimer=ps.DISCLAIMER)
 
 
 @router.get("/picks/top", response_model=PicksDayOut)
 async def top_picks(day: date | None = Query(default=None, alias="date"), n: int = Query(default=10, ge=1, le=10),
-                    user: User = Depends(verified_adult), plan: Plan = Depends(require_entitlement("top10")),
+                    user: Viewer = Depends(verified_viewer), plan: Plan = Depends(require_entitlement("top10")),
                     _rl: None = Depends(product_limit), db: AsyncSession = Depends(get_db)) -> PicksDayOut:
     """The day's n highest-confidence single picks (Pro and Elite)."""
     day = day or _today()
@@ -146,7 +153,7 @@ async def top_picks(day: date | None = Query(default=None, alias="date"), n: int
 
 
 @router.post("/slips", response_model=SlipOut)
-async def build_slip(body: SlipIn, user: User = Depends(verified_adult),
+async def build_slip(body: SlipIn, user: Viewer = Depends(verified_viewer),
                      plan: Plan = Depends(require_entitlement("slip_builder")), _rl: None = Depends(product_limit),
                      db: AsyncSession = Depends(get_db)) -> SlipOut:
     """Build a slip whose combined odds land near the user's target (Pro: 5/day, Elite: unlimited)."""
@@ -184,7 +191,7 @@ async def build_slip(body: SlipIn, user: User = Depends(verified_adult),
 
 
 @router.get("/jackpot", response_model=JackpotOut)
-async def jackpot(week_of: date | None = None, user: User = Depends(verified_adult),
+async def jackpot(week_of: date | None = None, user: Viewer = Depends(verified_viewer),
                   plan: Plan = Depends(require_entitlement("jackpot")), _rl: None = Depends(product_limit),
                   db: AsyncSession = Depends(get_db)) -> JackpotOut:
     """Weekly jackpot: the two highest-confidence picks for each day of the ISO week (Elite). Legs keep their

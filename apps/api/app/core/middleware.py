@@ -1,4 +1,5 @@
-"""HTTP middleware: request id + access log, security headers, body-size limit, CSRF (double submit)."""
+"""HTTP middleware: request id + access log, security headers, body-size limit, CSRF (double submit), ETags."""
+import hashlib
 import hmac
 import time
 import uuid
@@ -61,6 +62,57 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
         if length and length.isdigit() and int(length) > self.max_bytes:
             return JSONResponse({"detail": "Request body too large"}, status_code=413)
         return await call_next(request)
+
+
+class ETagMiddleware:
+    """Weak ETag on successful JSON GET responses; `If-None-Match` with the same tag gets 304 without a body.
+    Pages poll pick lists that change a few times a day, so most polls become a few hundred bytes. The browser
+    sends If-None-Match by itself once its cached copy is older than Cache-Control max-age. Pure ASGI (it must
+    buffer the body to hash it); add it inside GZip so the tag is computed on the uncompressed JSON."""
+
+    def __init__(self, app, prefix: str):
+        self.app = app
+        self.prefix = prefix
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http" or scope["method"] != "GET" or not scope["path"].startswith(self.prefix):
+            await self.app(scope, receive, send)
+            return
+        wanted = next((v.decode() for k, v in scope["headers"] if k == b"if-none-match"), None)
+        start: dict | None = None
+        chunks: list[bytes] = []
+        passthrough = False
+
+        async def wrapped(message) -> None:
+            nonlocal start, passthrough
+            if passthrough:
+                await send(message)
+                return
+            if message["type"] == "http.response.start":
+                ctype = next((v for k, v in message["headers"] if k == b"content-type"), b"")
+                if message["status"] != 200 or not ctype.startswith(b"application/json"):
+                    passthrough = True
+                    await send(message)
+                    return
+                start = message
+                return
+            chunks.append(message.get("body", b""))
+            if message.get("more_body"):
+                return
+            body = b"".join(chunks)
+            tag = f'W/"{hashlib.sha256(body).hexdigest()[:32]}"'
+            headers = [(k, v) for k, v in start["headers"] if k != b"content-length"]
+            headers.append((b"etag", tag.encode()))
+            if wanted and tag in (t.strip() for t in wanted.split(",")):
+                await send({"type": "http.response.start", "status": 304, "headers": [
+                    (k, v) for k, v in headers if k in (b"etag", b"cache-control", b"vary", b"x-request-id")]})
+                await send({"type": "http.response.body", "body": b""})
+                return
+            headers.append((b"content-length", str(len(body)).encode()))
+            await send({**start, "headers": headers})
+            await send({"type": "http.response.body", "body": body})
+
+        await self.app(scope, receive, wrapped)
 
 
 class CSRFMiddleware(BaseHTTPMiddleware):

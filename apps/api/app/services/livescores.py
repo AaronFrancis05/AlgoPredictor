@@ -391,6 +391,18 @@ async def poll(db: AsyncSession, now: datetime) -> int:
     return changed
 
 
+async def next_update_at(now: datetime) -> datetime | None:
+    """When the worker's next score poll is due: last poll + current interval, at least a minute ahead (the tick
+    runs each minute). None when nothing has been polled today or the feed is paused."""
+    last, interval, paused = await get_redis().mget("livescore:last_poll", "livescore:interval", "livescore:paused")
+    if paused or not last or not interval:
+        return None
+    due = datetime.fromisoformat(last) + timedelta(seconds=float(interval))
+    if due < now - timedelta(minutes=10):  # stale: polling has stopped (no matches in play)
+        return None
+    return max(due, now + timedelta(seconds=60)).replace(microsecond=0)
+
+
 async def tick(db: AsyncSession, now: datetime | None = None) -> None:
     """Worker entry point (every minute). Does nothing - and costs no provider calls - without a key or matches."""
     if not get_settings().api_football_key.get_secret_value():

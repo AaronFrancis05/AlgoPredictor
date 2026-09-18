@@ -47,10 +47,21 @@ def _l1_drop(prefix: str) -> None:
 
 def clear_local() -> None:
     _l1.clear()
+    _gen_l1.clear()
+
+
+_gen_l1: dict[str, tuple[float, str]] = {}
 
 
 async def _generation(namespace: str) -> str:
-    return await get_redis().get(f"cachegen:{namespace}") or "0"
+    """The namespace's generation, remembered locally for L1_TTL_SECONDS: an L1 miss then costs one Redis GET
+    instead of two. Another instance's invalidate() reaches this one within the same bound as L1 itself."""
+    hit = _gen_l1.get(namespace)
+    if hit is not None and hit[0] >= time.monotonic():
+        return hit[1]
+    gen = await get_redis().get(f"cachegen:{namespace}") or "0"
+    _gen_l1[namespace] = (time.monotonic() + L1_TTL_SECONDS, gen)
+    return gen
 
 
 async def cached(namespace: str, key: str, ttl: int, producer: Callable[[], Awaitable[Any]]) -> Any:
@@ -91,5 +102,8 @@ async def forget(namespace: str, key: str) -> None:
 
 
 async def invalidate(namespace: str) -> None:
-    _l1_drop(f"{namespace}:")
-    await get_redis().incr(f"cachegen:{namespace}")
+    try:
+        await get_redis().incr(f"cachegen:{namespace}")
+    finally:  # drop local copies after the bump, so a concurrent request cannot re-cache the old generation
+        _l1_drop(f"{namespace}:")
+        _gen_l1.pop(namespace, None)

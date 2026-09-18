@@ -1,7 +1,7 @@
 """Reading published picks, applying plan restrictions, and serialising them."""
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache import cached
@@ -72,12 +72,29 @@ def serialise(d: dict, plan: Plan, locked: bool = False) -> PickOut:
                    model_version=d["model_version"], result=d["result"], correct=d["correct"])
 
 
+def status_of(d: dict, states: dict[str, dict], now: datetime) -> tuple[str, dict | None, str | None, bool]:
+    """(phase, feed state, outcome, outcome_official) of one published pick (a dict from picks_between).
+    Official grade first, else the feed's full-time score (provisional)."""
+    st = states.get(livescores.match_key(d["kickoff_date"], d["home_team"], d["away_team"]))
+    phase = livescores.phase_of(datetime.fromisoformat(d["kickoff_at"]), d["result"], st, now,
+                                has_time=bool(d["kickoff_time"]))
+    if d["correct"] is not None:
+        return phase, st, ("won" if d["correct"] else "lost"), True
+    if phase == "finished" and st:
+        side = livescores.outcome_from_goals(st["home_goals"], st["away_goals"])
+        return phase, st, (None if side is None else "won" if side == d["pick"] else "lost"), False
+    return phase, st, None, False
+
+
+async def states_for(db: AsyncSession, days: list) -> dict[str, dict]:
+    return await livescores.live_states(db, min(days), max(days)) if days else {}
+
+
 async def with_status(db: AsyncSession, items: list[PickOut], now: datetime) -> list[PickOut]:
     """Set each pick's match phase, live score and outcome (official grade first, else the feed's full time)."""
     if not items:
         return items
-    days = [p.kickoff_date for p in items]
-    states = await livescores.live_states(db, min(days), max(days))
+    states = await states_for(db, [p.kickoff_date for p in items])
     for p in items:
         st = states.get(livescores.match_key(p.kickoff_date, p.home_team, p.away_team))
         p.phase = livescores.phase_of(p.kickoff_at, p.result, st, now, has_time=bool(p.kickoff_time))
@@ -131,26 +148,32 @@ def apply_plan(day_picks: list[dict], plan: Plan, now: datetime,
 
 async def track_record(db: AsyncSession) -> dict:
     async def load() -> dict:
-        base = (select(Pick, PickResult).join(PickResult, PickResult.prediction_id == Pick.prediction_id)
-                .where(Pick.is_demo.is_(False)))
-        rows = (await db.execute(base.order_by(Pick.kickoff_at.desc()))).all()
-        n = len(rows)
-        by_tier: dict[str, list] = {}
-        by_month: dict[str, list] = {}
-        for p, r in rows:
-            by_tier.setdefault(p.tier, []).append((r.correct, p.confidence, r.rps))
-            by_month.setdefault(p.kickoff_date.strftime("%Y-%m"), []).append((r.correct, r.rps))
+        """Aggregates run in the database (per tier, and per day rolled up to months here, which stays portable
+        across Postgres and SQLite); only the 20 most recent graded rows are loaded."""
+        graded = (select(Pick, PickResult).join(PickResult, PickResult.prediction_id == Pick.prediction_id)
+                  .where(Pick.is_demo.is_(False)))
+        wins = func.sum(case((PickResult.correct.is_(True), 1), else_=0))
+        joined = (select().select_from(Pick).join(PickResult, PickResult.prediction_id == Pick.prediction_id)
+                  .where(Pick.is_demo.is_(False)))
+        tiers = (await db.execute(joined.add_columns(Pick.tier, func.count(), wins, func.avg(Pick.confidence))
+                                  .group_by(Pick.tier).order_by(Pick.tier))).all()
+        days = (await db.execute(joined.add_columns(Pick.kickoff_date, func.count(), wins, func.sum(PickResult.rps))
+                                 .group_by(Pick.kickoff_date))).all()
+        months: dict[str, list[float]] = {}
+        for d, n, w, rps in days:
+            m = months.setdefault(d.strftime("%Y-%m"), [0, 0, 0.0])
+            m[0], m[1], m[2] = m[0] + n, m[1] + (w or 0), m[2] + (rps or 0.0)
+        n = sum(m[0] for m in months.values())
+        recent = (await db.execute(graded.order_by(Pick.kickoff_at.desc()).limit(20))).all()
         first = (await db.execute(select(func.min(Pick.kickoff_date)).where(Pick.is_demo.is_(False)))).scalar()
         return dict(
             graded=n,
-            hit_rate=sum(r.correct for _, r in rows) / n if n else None,
-            mean_rps=sum(r.rps for _, r in rows) / n if n else None,
-            by_tier=[dict(tier=t, graded=len(v), hit_rate=sum(c for c, _, _ in v) / len(v),
-                          avg_confidence=sum(x for _, x, _ in v) / len(v))
-                     for t, v in sorted(by_tier.items())],
-            by_month=[dict(month=m, graded=len(v), hit_rate=sum(c for c, _ in v) / len(v),
-                           mean_rps=sum(x for _, x in v) / len(v)) for m, v in sorted(by_month.items())],
-            recent=[_row_to_dict(p, r) for p, r in rows[:20]],
+            hit_rate=sum(m[1] for m in months.values()) / n if n else None,
+            mean_rps=sum(m[2] for m in months.values()) / n if n else None,
+            by_tier=[dict(tier=t, graded=c, hit_rate=(w or 0) / c, avg_confidence=avg) for t, c, w, avg in tiers],
+            by_month=[dict(month=k, graded=m[0], hit_rate=m[1] / m[0], mean_rps=m[2] / m[0])
+                      for k, m in sorted(months.items())],
+            recent=[_row_to_dict(p, r) for p, r in recent],
             live_since=first.isoformat() if first else None,
         )
 

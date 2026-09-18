@@ -24,7 +24,7 @@ _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
 
-def engine_kwargs(url: str, db_ssl: str, transaction_pooler: bool) -> dict:
+def engine_kwargs(url: str, db_ssl: str, transaction_pooler: bool, pool_size: int = 5, max_overflow: int = 5) -> dict:
     if url.startswith("sqlite"):
         return {}
     connect_args: dict = {}
@@ -37,15 +37,16 @@ def engine_kwargs(url: str, db_ssl: str, transaction_pooler: bool) -> dict:
     if transaction_pooler:
         connect_args.update(statement_cache_size=0, prepared_statement_cache_size=0)
         return dict(poolclass=NullPool, connect_args=connect_args)
-    return dict(pool_size=10, max_overflow=20, pool_pre_ping=True, pool_recycle=1800, connect_args=connect_args)
+    return dict(pool_size=pool_size, max_overflow=max_overflow, pool_pre_ping=True, pool_recycle=1800,
+                connect_args=connect_args)
 
 
 def get_engine() -> AsyncEngine:
     global _engine, _sessionmaker
     if _engine is None:
         s = get_settings()
-        _engine = create_async_engine(s.database_url,
-                                      **engine_kwargs(s.database_url, s.db_ssl, s.db_transaction_pooler))
+        _engine = create_async_engine(s.database_url, **engine_kwargs(
+            s.database_url, s.db_ssl, s.db_transaction_pooler, s.db_pool_size, s.db_max_overflow))
         _sessionmaker = async_sessionmaker(_engine, expire_on_commit=False)
     return _engine
 
