@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   CalendarDays,
   ChevronDown,
@@ -25,9 +25,9 @@ import { Logo } from "@/components/site-chrome";
 import { Alert, Badge, Container, Skeleton } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { cn, initials } from "@/lib/format";
-import { useMe, useNow } from "@/lib/hooks";
+import { useLive, useMe, useNow } from "@/lib/hooks";
 import { phaseAt } from "@/lib/match";
-import { LivePicks, Message, type User } from "@/lib/schemas";
+import { Message, type User } from "@/lib/schemas";
 import { accountNav, appNav } from "@/lib/site";
 
 const navIcons: Record<string, LucideIcon> = {
@@ -42,8 +42,7 @@ const navIcons: Record<string, LucideIcon> = {
 /** Number of matches in play, for the dot on the Live tab. Shares its cache with the Live page. */
 function useLiveCount(enabled: boolean): number {
   const now = useNow(30_000);
-  const q = useQuery({ queryKey: ["live"], queryFn: () => api("/picks/live", LivePicks), enabled,
-                       refetchInterval: 60_000, staleTime: 15_000 });
+  const q = useLive(enabled);
   // same rule as the Live page: only matches still in play by the viewer's clock count
   return (q.data?.picks ?? []).filter((p) => phaseAt(p, now) === "live").length;
 }

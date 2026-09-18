@@ -55,6 +55,8 @@ export const LivePicks = z.object({
   plan: z.string(),
   picks: z.array(Pick),
   feed: z.boolean(),
+  // when the list is next expected to change (next score poll or kick-off); absent on older APIs
+  next_update_at: z.string().nullable().optional().default(null),
   disclaimer: z.string(),
 });
 export type LivePicks = z.infer<typeof LivePicks>;

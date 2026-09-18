@@ -9,7 +9,7 @@ import { Disclaimer, leagueName, MatchList } from "@/components/picks";
 import { Button, EmptyState, PageHeader, Segmented, Select, Skeleton } from "@/components/ui";
 import { ErrorPanel } from "@/components/upgrade";
 import { api } from "@/lib/api";
-import { cn, isoDate, localDay, pct } from "@/lib/format";
+import { cn, isoDate, localDay, pct, today } from "@/lib/format";
 import { useNow } from "@/lib/hooks";
 import { History, type Pick } from "@/lib/schemas";
 
@@ -21,8 +21,9 @@ const RANGES = [
 type Outcome = "all" | "won" | "lost" | "pending";
 const PAGE_SIZE = 50;
 
+/** n days before the viewer's local today. */
 function daysAgo(n: number) {
-  const d = new Date();
+  const d = new Date(`${today()}T12:00:00Z`);
   d.setUTCDate(d.getUTCDate() - n);
   return isoDate(d);
 }
@@ -83,7 +84,7 @@ function HistoryView() {
 
   const range = params.get("range") ?? "7";
   const from = params.get("from") ?? daysAgo(Number(range) - 1);
-  const to = params.get("to") ?? isoDate();
+  const to = params.get("to") ?? today();
   const league = params.get("league") ?? "";
   const tier = params.get("tier") ?? "";
   const outcome = (params.get("outcome") ?? "all") as Outcome;

@@ -96,6 +96,28 @@ async def test_track_record_aggregates(client):
                                                               reverse=True)
 
 
+async def test_live_list_announces_the_next_kickoff(client):
+    """Without a live feed, the live list next changes when the next published match kicks off."""
+    soon = (datetime.now(UTC) + timedelta(hours=3)).replace(second=0, microsecond=0)
+    picks = make_picks(soon.date(), 1, prefix="nko")
+    picks[0]["time"] = soon.astimezone(livescores.UK).strftime("%H:%M")
+    picks[0]["date"] = soon.astimezone(livescores.UK).date().isoformat()
+    picks[0]["home_team"], picks[0]["away_team"] = "Kickoff Hint Home", "Kickoff Hint Away"  # unique in shared DB
+    await publish(client, picks)
+    try:
+        body = (await client.get("/api/v1/picks/live")).json()
+        assert body["picks"] == [] and body["feed"] is False
+        assert datetime.fromisoformat(body["next_update_at"]) <= soon
+    finally:  # a match a few hours ahead would otherwise join other tests' live-score linking
+        from sqlalchemy import delete
+
+        from app.db.session import get_sessionmaker
+        from app.models import Pick
+        async with get_sessionmaker()() as db:
+            await db.execute(delete(Pick).where(Pick.prediction_id == picks[0]["prediction_id"]))
+            await db.commit()
+
+
 async def test_next_update_hint():
     now = datetime.now(UTC).replace(microsecond=0)
     redis = get_redis()

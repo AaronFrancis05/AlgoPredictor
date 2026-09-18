@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.logging import get_logger
 from app.core.ratelimit import rate_limit
 from app.db.session import get_db
 from app.deps import Viewer, optional_viewer, verified_viewer
@@ -29,6 +30,7 @@ from app.services import picks_service as ps
 from app.services.entitlements import active_plan, require_entitlement
 
 settings = get_settings()
+log = get_logger(__name__)
 router = APIRouter(tags=["predictions"])
 product_limit = rate_limit("products", settings.rate_limit_products)
 MAX_RANGE_DAYS = 14
@@ -73,17 +75,21 @@ async def live_picks(response: Response, user: Viewer | None = Depends(optional_
     now = datetime.now(UTC)
     user, plan = await _viewer_plan(db, user)
     today = now.date()
-    rows = [r for r in await ps.picks_between(db, today - timedelta(days=1), today + timedelta(days=1))
-            if datetime.fromisoformat(r["kickoff_at"]) <= now + timedelta(minutes=5)]
+    around = await ps.picks_between(db, today - timedelta(days=1), today + timedelta(days=1))
+    rows = [r for r in around if datetime.fromisoformat(r["kickoff_at"]) <= now + timedelta(minutes=5)]
     items = await ps.with_status(db, ps.apply_plan_by_day(rows, plan, now, signed_in=user is not None), now)
     live = sorted((p for p in items if p.phase == "live"), key=lambda p: (p.kickoff_at, p.home_team))
     response.headers["Cache-Control"] = "private, max-age=15" if user else "public, max-age=15"
     feed = bool(settings.api_football_key.get_secret_value())
+    # the list changes when the feed is next polled or the next match kicks off, whichever is first
+    hints = [k for r in around if (k := datetime.fromisoformat(r["kickoff_at"])) > now]
     try:
-        next_update = await livescores.next_update_at(now) if feed and live else None
-    except Exception:  # a hint only: Redis trouble must not fail the page
-        next_update = None
-    return LivePicksOut(plan=plan.code, picks=live, feed=feed, next_update_at=next_update, disclaimer=ps.DISCLAIMER)
+        if feed and live and (due := await livescores.next_update_at(now)):
+            hints.append(due)
+    except Exception as e:  # a hint only: Redis trouble must not fail the page
+        log.warning("live_next_update_failed", error=str(e))
+    return LivePicksOut(plan=plan.code, picks=live, feed=feed, next_update_at=min(hints, default=None),
+                        disclaimer=ps.DISCLAIMER)
 
 
 def _summary(rows: list[tuple[dict, tuple]]) -> tuple[HistorySummary, list[dict]]:

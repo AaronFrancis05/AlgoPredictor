@@ -6,7 +6,7 @@ import { Disclaimer, MatchList, PickCard } from "@/components/picks";
 import { EmptyState, PageHeader, Spinner } from "@/components/ui";
 import { ErrorPanel } from "@/components/upgrade";
 import { api } from "@/lib/api";
-import { isoDate } from "@/lib/format";
+import { today } from "@/lib/format";
 import { useMe, useNow } from "@/lib/hooks";
 import { phaseAt } from "@/lib/match";
 import { PicksDay } from "@/lib/schemas";
@@ -14,7 +14,7 @@ import { PicksDay } from "@/lib/schemas";
 export default function TopPicks() {
   const me = useMe();
   const now = useNow(30_000);
-  const day = isoDate();
+  const day = today(); // the viewer's date; re-read on every useNow tick, so it rolls over at midnight
   const q = useQuery({ queryKey: ["top", day], queryFn: () => api(`/picks/top?date=${day}&n=10`, PicksDay),
                        refetchInterval: 60_000 });
   const ranked = (q.data?.picks ?? []).map((p, i) => ({ p, rank: i + 1 }));

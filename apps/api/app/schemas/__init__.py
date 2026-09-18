@@ -189,7 +189,8 @@ class LivePicksOut(BaseModel):
     plan: str
     picks: list[PickOut]
     feed: bool                       # is a live-score feed configured
-    # when the worker is next expected to refresh scores (None = unknown); clients refetch then, not on a timer
+    # when this list is next expected to change: the worker's next score poll or the next kick-off, whichever is
+    # first (None = nothing scheduled). Clients refetch then instead of on a fixed timer.
     next_update_at: datetime | None = None
     disclaimer: str
 

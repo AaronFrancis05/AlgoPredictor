@@ -1,6 +1,5 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { useMemo } from "react";
@@ -8,21 +7,14 @@ import { useMemo } from "react";
 import { Disclaimer, LiveDot, MatchList } from "@/components/picks";
 import { EmptyState, PageHeader, Skeleton } from "@/components/ui";
 import { ErrorPanel } from "@/components/upgrade";
-import { api } from "@/lib/api";
-import { useNow } from "@/lib/hooks";
+import { useLive, useNow } from "@/lib/hooks";
 import { phaseAt } from "@/lib/match";
-import { LivePicks } from "@/lib/schemas";
 
-const REFRESH_MS = 30_000;
+const timeFmt = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
 
 export default function LivePage() {
   const now = useNow(15_000);
-  const q = useQuery({
-    queryKey: ["live"],
-    queryFn: () => api("/picks/live", LivePicks),
-    refetchInterval: REFRESH_MS,
-    refetchIntervalInBackground: false,
-  });
+  const q = useLive();
   // a match can reach full time between refreshes: keep only what is still in play by the viewer's clock too
   const live = useMemo(() => (q.data?.picks ?? []).filter((p) => phaseAt(p, now) === "live"), [q.data, now]);
   const updated = q.dataUpdatedAt
@@ -37,7 +29,8 @@ export default function LivePage() {
         action={updated ? (
           <p className="inline-flex items-center gap-1.5 text-xs text-muted" role="status" aria-live="polite">
             <RefreshCw className={q.isFetching ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} aria-hidden />
-            Updated {updated} · refreshes every 30 s
+            Updated {updated}
+            {q.data?.next_update_at ? <> · next update about {timeFmt.format(Date.parse(q.data.next_update_at))}</> : null}
           </p>
         ) : null}
       />

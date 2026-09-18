@@ -54,6 +54,24 @@ export function pickLabel(pick: "home" | "draw" | "away" | null, home: string, a
   return "Locked";
 }
 
+/** The UTC calendar date of an instant. For date arithmetic on YYYY-MM-DD strings, not for "today". */
 export function isoDate(d = new Date()): string {
   return d.toISOString().slice(0, 10);
+}
+
+/** Today in the viewer's own time zone (YYYY-MM-DD). In Kampala the day starts at local midnight, not 03:00. */
+export function today(): string {
+  return localDay(new Date());
+}
+
+export const TZ_COOKIE = "ap_tz";
+
+/** Today in an IANA time zone (server side, from the viewer's ap_tz cookie); UTC if the zone is unknown. */
+export function todayIn(timeZone: string | undefined, now = new Date()): string {
+  try {
+    if (timeZone) return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+  } catch {
+    // invalid zone: fall through
+  }
+  return isoDate(now);
 }
