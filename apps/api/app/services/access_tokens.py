@@ -16,6 +16,7 @@ from app.core.cache import invalidate
 from app.core.logging import get_logger
 from app.core.security import token_digest
 from app.models import ROLES, AccessToken, Plan, Subscription, User
+from app.services import notifications
 from app.services.entitlements import active_plan, forget_user_plans
 
 log = get_logger(__name__)
@@ -89,10 +90,36 @@ async def revoke(db: AsyncSession, token_id: uuid.UUID) -> AccessToken:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Token not found")
     now = datetime.now(UTC)
     token.revoked_at = token.revoked_at or now
+    ending = (await db.execute(select(Subscription.id, Subscription.user_id, Subscription.plan_code)
+                               .where(Subscription.access_token_id == token_id, Subscription.status != "canceled",
+                                      Subscription.current_period_end > now))).all()
+    if ending:
+        names = await notifications.plan_names(db)
+        await notifications.notify_many(db, [notifications.access_ended(uid, sid, names.get(p, p.capitalize()),
+                                                                        revoked=True) for sid, uid, p in ending])
     await db.execute(update(Subscription).where(Subscription.access_token_id == token_id,
                                                 Subscription.status != "canceled")
                      .values(status="canceled", current_period_end=now, updated_at=now))
     return token
+
+
+async def set_limit(db: AsyncSession, token_id: uuid.UUID, max_redemptions: int | None) -> tuple[AccessToken, int]:
+    """Change how many people may use a token (None = unlimited). Never below the uses already made, so nobody
+    loses access, and never on a revoked or expired token (that would not bring it back). Locks the row like
+    redeem() so a redemption running at the same moment is counted."""
+    token = (await db.execute(select(AccessToken).where(AccessToken.id == token_id)
+                              .with_for_update())).scalar_one_or_none()
+    if token is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Token not found")
+    now = datetime.now(UTC)
+    if token.revoked_at is not None or _aware(token.expires_at) <= now:
+        raise HTTPException(status.HTTP_409_CONFLICT, "This token is revoked or expired. Create a new one instead")
+    used = (await redemption_counts(db, [token.id])).get(token.id, 0)
+    if max_redemptions is not None and max_redemptions < used:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                            f"{used} people have already used this token, so the limit must be at least {used}")
+    token.max_redemptions = max_redemptions
+    return token, used
 
 
 async def redeem(db: AsyncSession, user: User, code: str) -> Subscription:
@@ -125,6 +152,8 @@ async def redeem(db: AsyncSession, user: User, code: str) -> Subscription:
     sub = Subscription(user_id=user.id, plan_code=token.plan_code, provider=PROVIDER, status="active",
                        current_period_end=_aware(token.expires_at), access_token_id=token.id)
     db.add(sub)
+    await db.flush()  # gives sub its id for the notification's dedupe key
+    await notifications.notify_many(db, [notifications.access_granted(user.id, sub, granted.name)])
     return sub
 
 

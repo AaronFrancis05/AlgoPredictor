@@ -148,6 +148,60 @@ async def test_code_that_adds_nothing_is_refused_and_not_used_up(client):
     assert r.status_code == 200, r.text
 
 
+async def test_admin_raises_limit_of_used_up_token(client):
+    await _make_admin(client)
+    token = await _create_token(client, max_redemptions=1)
+    limit_url = f"/api/v1/admin/access-tokens/{token['id']}/limit"
+
+    await _fresh_limits()
+    first = await register_verified(client)
+    await login(client, first)
+    assert (await client.post("/api/v1/me/access-token", json={"code": token["code"]},
+                              headers=_csrf(client))).status_code == 200
+    second = await register_verified(client)
+    await login(client, second)
+    r = await client.post("/api/v1/me/access-token", json={"code": token["code"]}, headers=_csrf(client))
+    assert r.status_code == 400  # used up
+
+    await _make_admin(client)
+    r = await client.post(limit_url, json={"max_redemptions": 0}, headers=_csrf(client))
+    assert r.status_code == 422  # below 1 is not a limit
+    r = await client.post(limit_url, json={"max_redemptions": 3}, headers=_csrf(client))
+    assert r.status_code == 200, r.text
+    assert r.json()["max_redemptions"] == 3 and r.json()["status"] == "active" and r.json()["redemptions"] == 1
+
+    await _fresh_limits()
+    await login(client, second)
+    r = await client.post("/api/v1/me/access-token", json={"code": token["code"]}, headers=_csrf(client))
+    assert r.status_code == 200, r.text
+    assert (await client.get("/api/v1/me")).json()["plan"] == "pro"
+
+    await _make_admin(client)
+    r = await client.post(limit_url, json={"max_redemptions": 1}, headers=_csrf(client))
+    assert r.status_code == 422  # two people already used it; nobody loses access
+    r = await client.post(limit_url, json={"max_redemptions": None}, headers=_csrf(client))
+    assert r.status_code == 200 and r.json()["max_redemptions"] is None and r.json()["status"] == "active"
+    await _fresh_limits()
+    await login(client, first)
+    assert (await client.get("/api/v1/me")).json()["plan"] == "pro"  # earlier redemptions untouched
+
+
+async def test_limit_refused_for_revoked_token_and_non_admins(client):
+    await _make_admin(client)
+    token = await _create_token(client, max_redemptions=1)
+    limit_url = f"/api/v1/admin/access-tokens/{token['id']}/limit"
+    await client.post(f"/api/v1/admin/access-tokens/{token['id']}/revoke", headers=_csrf(client))
+    r = await client.post(limit_url, json={"max_redemptions": 5}, headers=_csrf(client))
+    assert r.status_code == 409
+    r = await client.post(f"/api/v1/admin/access-tokens/{uuid.uuid4()}/limit", json={"max_redemptions": 5},
+                          headers=_csrf(client))
+    assert r.status_code == 404
+
+    await _fresh_limits()
+    await login(client, await register_verified(client))
+    assert (await client.post(limit_url, json={"max_redemptions": 5}, headers=_csrf(client))).status_code == 403
+
+
 async def test_last_admin_cannot_be_demoted(client):
     email = await _make_admin(client)
     r = await client.post("/api/v1/admin/users/role", json={"email": email, "role": "user"}, headers=_csrf(client))

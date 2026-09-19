@@ -362,6 +362,10 @@ class AccessTokenIn(BaseModel):
         return v
 
 
+class AccessTokenLimitIn(BaseModel):
+    max_redemptions: int | None = Field(ge=1, le=100_000)  # null = unlimited
+
+
 class AccessTokenRedeemer(BaseModel):
     email: str
     redeemed_at: datetime
@@ -384,6 +388,28 @@ class AccessTokenOut(BaseModel):
 
 class AccessTokenCreatedOut(AccessTokenOut):
     code: str  # shown once
+
+
+# ---------------------------------------------------------------- in-app notifications
+class NotificationOut(BaseModel):
+    id: UUID
+    kind: str
+    title: str
+    body: str
+    link: str | None
+    created_at: datetime
+    read: bool
+
+
+class NotificationsOut(BaseModel):
+    items: list[NotificationOut]
+    unread: int
+
+
+class NotificationsReadIn(BaseModel):
+    """Either some ids, or all=true for everything."""
+    ids: list[UUID] = Field(default_factory=list, max_length=100)
+    all: bool = False
 
 
 class RedeemIn(BaseModel):

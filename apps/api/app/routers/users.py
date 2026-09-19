@@ -24,11 +24,14 @@ from app.schemas import (
     MfaEnableIn,
     MfaRecoveryCodesOut,
     MfaSetupOut,
+    NotificationOut,
+    NotificationsOut,
+    NotificationsReadIn,
     PasswordSetIn,
     RedeemIn,
     UserOut,
 )
-from app.services import access_tokens
+from app.services import access_tokens, notifications
 from app.services import auth_service as auth
 from app.services.audit import audit
 from app.services.entitlements import require_entitlement
@@ -226,6 +229,31 @@ async def unfollow(kind: Literal["match", "league"], target: str, user: User = D
     return await _follows(db, user.id)
 
 
+# ------------------------------------------------------------------ in-app notifications
+async def _notifications(db: AsyncSession, user_id) -> NotificationsOut:
+    items, unread = await notifications.list_for(db, user_id)
+    return NotificationsOut(unread=unread, items=[
+        NotificationOut(id=n.id, kind=n.kind, title=n.title, body=n.body, link=n.link, created_at=n.created_at,
+                        read=n.read_at is not None) for n in items])
+
+
+@router.get("/notifications", response_model=NotificationsOut)
+async def list_notifications(user: User = Depends(current_user),
+                             db: AsyncSession = Depends(get_db)) -> NotificationsOut:
+    """The newest notifications and the unread count (the bell polls this)."""
+    return await _notifications(db, user.id)
+
+
+@router.post("/notifications/read", response_model=NotificationsOut)
+async def read_notifications(body: NotificationsReadIn, user: User = Depends(current_user),
+                             db: AsyncSession = Depends(get_db)) -> NotificationsOut:
+    if not body.all and not body.ids:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Give ids or all=true")
+    await notifications.mark_read(db, user.id, None if body.all else body.ids)
+    await db.commit()
+    return await _notifications(db, user.id)
+
+
 @router.get("/export")
 async def export_data(user: User = Depends(current_user), db: AsyncSession = Depends(get_db)) -> dict:
     """Everything stored about the account (GDPR-style access request)."""
@@ -244,6 +272,7 @@ async def export_data(user: User = Depends(current_user), db: AsyncSession = Dep
         slips=[dict(kind=s.kind, target_odds=s.target_odds, combined_odds=s.combined_odds, legs=s.legs,
                     created_at=s.created_at) for s in slips],
         follows=(await _follows(db, user.id)).model_dump(),
+        notifications=[n.model_dump() for n in (await _notifications(db, user.id)).items],
         security_events=[dict(action=a.action, created_at=a.created_at) for a in logs],
     )
 

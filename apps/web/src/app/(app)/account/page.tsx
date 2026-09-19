@@ -1,7 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { BadgeCheck, Check, Download, KeyRound, LogOut, Minus } from "lucide-react";
+import { BadgeCheck, BellRing, Check, Download, KeyRound, LogOut, Minus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, type ReactNode, Suspense, useState } from "react";
@@ -11,6 +11,7 @@ import { Alert, Badge, Button, ButtonLink, Card, Input } from "@/components/ui";
 import { api } from "@/lib/api";
 import { cn, initials } from "@/lib/format";
 import { useMe } from "@/lib/hooks";
+import { notificationsSupported, showDeviceNotification, useAccountNotifySetting } from "@/lib/notify";
 import { type Entitlements, Message } from "@/lib/schemas";
 import { site } from "@/lib/site";
 
@@ -55,6 +56,25 @@ function Included({ value }: { value: string | boolean }) {
   );
 }
 
+/** After a code is accepted: offer device notifications if they are off, and show this one straight away. */
+function OfferDeviceNotifications({ message }: { message: string }) {
+  const [on, enable] = useAccountNotifySetting();
+  const [state, setState] = useState<"idle" | "blocked">("idle");
+  if (on || !notificationsSupported() || Notification.permission === "denied") return null;
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+      <span>Get messages like this on your device, such as a reminder before this access ends.</span>
+      <Button type="button" variant="secondary" className="px-2.5 py-1.5 text-xs" onClick={async () => {
+        if (!(await enable())) return setState("blocked");
+        await showDeviceNotification("Access code accepted", { body: message, tag: "access-code", link: "/dashboard" });
+      }}>
+        <BellRing className="h-3.5 w-3.5" aria-hidden />Turn on notifications
+      </Button>
+      {state === "blocked" ? <span>Blocked in the browser settings for this site.</span> : null}
+    </div>
+  );
+}
+
 function RedeemCode() {
   const qc = useQueryClient();
   const [code, setCode] = useState("");
@@ -88,6 +108,7 @@ function RedeemCode() {
         </Button>
       </form>
       {msg ? <Alert tone={msg.tone}>{msg.text}</Alert> : null}
+      {msg?.tone === "success" ? <OfferDeviceNotifications message={msg.text} /> : null}
     </Card>
   );
 }

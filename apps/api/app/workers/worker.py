@@ -12,7 +12,7 @@ from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 from app.db.session import get_sessionmaker
 from app.models import WebhookEvent
-from app.services import billing, livescores, picks_service, users
+from app.services import billing, livescores, notifications, picks_service, users
 
 log = get_logger("worker")
 
@@ -54,6 +54,17 @@ async def purge_closed_accounts(ctx) -> int:
         return await users.purge_closed_accounts(db)
 
 
+async def access_reminders(ctx) -> int:
+    """Notify people whose code-granted access ends within 3 days, and once more when it has ended."""
+    async with get_sessionmaker()() as db:
+        return await notifications.access_reminders(db)
+
+
+async def purge_old_notifications(ctx) -> int:
+    async with get_sessionmaker()() as db:
+        return await notifications.purge_old(db)
+
+
 async def startup(ctx) -> None:
     configure_logging(get_settings().log_level)
 
@@ -71,10 +82,13 @@ class WorkerSettings:
     # Nothing enqueues ad-hoc jobs (only the crons below), so polling slowly loses nothing; each poll is one
     # billed Redis command on Upstash. Crons fire at most poll_delay seconds late.
     poll_delay = get_settings().worker_poll_delay_seconds
-    functions = [retry_failed_webhooks, warm_cache, purge_closed_accounts, livescore_tick]
+    functions = [retry_failed_webhooks, warm_cache, purge_closed_accounts, livescore_tick, access_reminders,
+                 purge_old_notifications]
     cron_jobs = [cron(retry_failed_webhooks, minute=set(range(0, 60, 5))),
                  cron(warm_cache, minute=set(range(0, 60, 10))),
                  # every minute; livescores.poll stretches the real interval to fit the daily request budget
                  cron(livescore_tick, minute=set(range(60)), timeout=50, unique=True),
-                 cron(purge_closed_accounts, hour={3}, minute={17})]
+                 cron(purge_closed_accounts, hour={3}, minute={17}),
+                 cron(access_reminders, minute={7}, unique=True),
+                 cron(purge_old_notifications, hour={3}, minute={37})]
     on_startup = startup

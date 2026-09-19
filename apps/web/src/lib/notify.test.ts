@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { changeMessage, matchSignature } from "./notify";
+import { changeMessage, freshUnread, matchSignature, safeLink } from "./notify";
 import { Pick } from "./schemas";
 
 const base = Pick.parse({
@@ -12,6 +12,24 @@ const base = Pick.parse({
 });
 const at = (status: string, h: number, a: number, phase = "live") =>
   Pick.parse({ ...base, phase, live: { status, elapsed: 50, home_goals: h, away_goals: a, updated_at: null } });
+
+describe("freshUnread", () => {
+  it("returns each new unread item once, oldest first", () => {
+    const seen = new Set(["a"]);
+    const items = [{ id: "c", read: false }, { id: "b", read: false }, { id: "x", read: true }, { id: "a", read: false }];
+    expect(freshUnread(seen, items).map((i) => i.id)).toEqual(["b", "c"]);
+    expect(freshUnread(seen, items)).toEqual([]);
+  });
+});
+
+describe("safeLink", () => {
+  it("only allows paths on this site", () => {
+    expect(safeLink("/account/plans")).toBe("/account/plans");
+    expect(safeLink("//evil.example")).toBeNull();
+    expect(safeLink("https://evil.example")).toBeNull();
+    expect(safeLink(null)).toBeNull();
+  });
+});
 
 describe("changeMessage", () => {
   it("stays quiet on first sight and when nothing changed", () => {

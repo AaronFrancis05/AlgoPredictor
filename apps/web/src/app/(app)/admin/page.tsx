@@ -125,6 +125,42 @@ function CreateToken({ onCreated }: { onCreated: () => void }) {
   );
 }
 
+function LimitEditor({ t, onDone }: { t: AccessToken; onDone: (saved: boolean) => void }) {
+  const [value, setValue] = useState(t.max_redemptions != null ? String(t.max_redemptions) : "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const parsed = value.trim() === "" ? null : Number(value);
+  const invalid = parsed !== null && (!Number.isInteger(parsed) || parsed < Math.max(1, t.redemptions));
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      await api(`/admin/access-tokens/${t.id}/limit`, AccessToken, { method: "POST", json: { max_redemptions: parsed } });
+      onDone(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not change the limit");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={save} className="space-y-2" noValidate>
+      <div className="flex flex-wrap items-end gap-2">
+        <Field label="Uses allowed" htmlFor={`limit-${t.id}`}
+               hint={`Empty = unlimited people. At least ${Math.max(1, t.redemptions)}, since ${t.redemptions} already used it.`}>
+          <Input id={`limit-${t.id}`} type="number" min={Math.max(1, t.redemptions)} inputMode="numeric" className="w-32"
+                 value={value} onChange={(e) => setValue(e.target.value)} autoFocus />
+        </Field>
+        <Button type="submit" className="px-3 py-2 text-xs" disabled={busy || invalid}>{busy ? "Saving…" : "Save limit"}</Button>
+        <Button type="button" variant="ghost" className="px-3 py-2 text-xs" onClick={() => onDone(false)}>Cancel</Button>
+      </div>
+      {error ? <Alert tone="error">{error}</Alert> : null}
+    </form>
+  );
+}
+
 function TokenTable({ tokens, onRevoke }: { tokens: AccessToken[]; onRevoke: (t: AccessToken) => void }) {
   const [open, setOpen] = useState<string | null>(null);
   return (
@@ -155,6 +191,9 @@ function TokenTable({ tokens, onRevoke }: { tokens: AccessToken[]; onRevoke: (t:
 function FragmentRow({ t, expanded, onToggle, onRevoke }: {
   t: AccessToken; expanded: boolean; onToggle: () => void; onRevoke: () => void;
 }) {
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const canEditLimit = t.status === "active" || t.status === "used_up";
   return (
     <>
       <tr className="align-top">
@@ -173,12 +212,28 @@ function FragmentRow({ t, expanded, onToggle, onRevoke }: {
                 {expanded ? "Hide users" : "Users"}
               </Button>
             ) : null}
+            {canEditLimit ? (
+              <Button variant="secondary" className="px-2.5 py-1.5 text-xs" aria-expanded={editing}
+                      onClick={() => setEditing(!editing)}>
+                Limit
+              </Button>
+            ) : null}
             {t.status !== "revoked" ? (
               <Button variant="secondary" className="px-2.5 py-1.5 text-xs text-danger" onClick={onRevoke}>Revoke</Button>
             ) : null}
           </div>
         </td>
       </tr>
+      {editing && canEditLimit ? (
+        <tr>
+          <td colSpan={7} className="bg-surface-2/40 px-4 py-3">
+            <LimitEditor t={t} onDone={(saved) => {
+              setEditing(false);
+              if (saved) void qc.invalidateQueries({ queryKey: ["admin", "tokens"] });
+            }} />
+          </td>
+        </tr>
+      ) : null}
       {expanded ? (
         <tr>
           <td colSpan={7} className="bg-surface-2/40 px-4 py-3">
