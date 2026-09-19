@@ -21,6 +21,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { NotificationBell } from "@/components/notification-bell";
 import { Logo } from "@/components/site-chrome";
 import { Alert, Badge, Button, Container, Skeleton } from "@/components/ui";
 import { api, ApiError, forgetSession } from "@/lib/api";
@@ -246,6 +247,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Badge className={cn("hidden capitalize sm:inline-flex", user.is_admin && "border-brand/50 text-brand")}>
                   {user.is_admin ? "Admin" : user.plan}
                 </Badge>
+                <NotificationBell />
                 <UserMenu user={user} onSignOut={logout} />
               </>
             ) : (

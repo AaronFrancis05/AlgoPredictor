@@ -57,6 +57,8 @@ export function proxy(request: NextRequest) {
     "img-src 'self' blob: data:",
     "font-src 'self'",
     `connect-src 'self'${eventsOrigin ? ` ${eventsOrigin}` : ""}`,
+    // /sw.js (notifications only); without this, workers fall back to script-src, where 'strict-dynamic' ignores 'self'
+    "worker-src 'self'",
     "object-src 'none'",
     "base-uri 'self'",
     // checkout pages of the payment providers are reached by redirect (not form posts), 'self' is enough

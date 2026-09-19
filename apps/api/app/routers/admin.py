@@ -9,7 +9,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.deps import admin_user
 from app.models import ROLE_ADMIN, AccessToken, Pick, PickResult, Subscription, User, WebhookEvent
-from app.schemas import AccessTokenCreatedOut, AccessTokenIn, AccessTokenOut, LiveLinkIn, Message, RoleIn
+from app.schemas import (
+    AccessTokenCreatedOut,
+    AccessTokenIn,
+    AccessTokenLimitIn,
+    AccessTokenOut,
+    LiveLinkIn,
+    Message,
+    RoleIn,
+)
 from app.services import access_tokens as tokens
 from app.services import livescores
 from app.services.audit import audit
@@ -114,6 +122,18 @@ async def create_access_token(body: AccessTokenIn, request: Request, admin: User
                 expires_at=body.expires_at.isoformat(), max_redemptions=body.max_redemptions)
     await db.commit()
     return {**_out(token, 0, datetime.now(UTC)), "code": code}
+
+
+@router.post("/access-tokens/{token_id}/limit", response_model=AccessTokenOut)
+async def set_access_token_limit(token_id: UUID, body: AccessTokenLimitIn, request: Request,
+                                 admin: User = Depends(admin_user), db: AsyncSession = Depends(get_db)) -> dict:
+    """Let more (or fewer, down to the uses already made) people use a token; null makes it unlimited."""
+    old = (await db.execute(select(AccessToken.max_redemptions).where(AccessToken.id == token_id))).scalar_one_or_none()
+    token, used = await tokens.set_limit(db, token_id, body.max_redemptions)
+    await audit(db, "access_token_limit_changed", request, admin.id, token=str(token_id),
+                old_max_redemptions=old, max_redemptions=body.max_redemptions)
+    await db.commit()
+    return _out(token, used, datetime.now(UTC), await tokens.redeemers(db, token.id))
 
 
 @router.post("/access-tokens/{token_id}/revoke", response_model=AccessTokenOut)

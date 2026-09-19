@@ -243,6 +243,18 @@ export const AccessToken = z.object({
 export type AccessToken = z.infer<typeof AccessToken>;
 export const AccessTokenCreated = AccessToken.extend({ code: z.string() });
 
+export const AppNotification = z.object({
+  id: z.string(),
+  kind: z.string(),
+  title: z.string(),
+  body: z.string(),
+  link: z.string().nullable(),
+  created_at: z.string(),
+  read: z.boolean(),
+});
+export type AppNotification = z.infer<typeof AppNotification>;
+export const Notifications = z.object({ items: z.array(AppNotification), unread: z.number() });
+
 // ------------------------------------------------------------------ forms
 const password = z
   .string()
