@@ -9,8 +9,8 @@ from datetime import UTC, datetime
 
 import httpx
 import jwt
-from fastapi import APIRouter, Depends, Request, Response
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -129,8 +129,18 @@ async def mfa_verify(body: MfaCodeIn, request: Request, response: Response,
 
 
 @router.post("/refresh", response_model=AuthOut)
-async def refresh(request: Request, response: Response, db: AsyncSession = Depends(get_db)) -> AuthOut:
-    user, csrf, mfa = await auth.rotate_refresh(db, request, response, request.cookies.get(REFRESH_COOKIE))
+async def refresh(request: Request, response: Response,
+                  db: AsyncSession = Depends(get_db)) -> AuthOut | JSONResponse:
+    try:
+        user, csrf, mfa = await auth.rotate_refresh(db, request, response, request.cookies.get(REFRESH_COOKIE))
+    except HTTPException as exc:
+        if exc.status_code != 401:
+            raise
+        # The session is over: say so in the cookies too. A raised HTTPException would drop cookies set on
+        # `response`, and a leftover ap_csrf makes the site look signed in while every page sends you to sign in.
+        failed = JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers)
+        auth.clear_session(failed)
+        return failed
     return await _auth_out(db, user, csrf, mfa_session=mfa)
 
 

@@ -22,8 +22,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Logo } from "@/components/site-chrome";
-import { Alert, Badge, Container, Skeleton } from "@/components/ui";
-import { api, ApiError } from "@/lib/api";
+import { Alert, Badge, Button, Container, Skeleton } from "@/components/ui";
+import { api, ApiError, forgetSession } from "@/lib/api";
 import { cn, initials } from "@/lib/format";
 import { FollowsProvider, useFollows } from "@/lib/follows";
 import { useLive, useMe, useNow, useToday } from "@/lib/hooks";
@@ -210,6 +210,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (me.error instanceof ApiError && me.error.status === 401) {
+      forgetSession();
       router.replace(`/login?next=${encodeURIComponent(pathname)}`);
     }
   }, [me.error, pathname, router]);
@@ -261,6 +262,14 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div className="space-y-4" aria-busy>
               <Skeleton className="h-8 w-56" />
               <Skeleton className="h-24 w-full" />
+            </div>
+          ) : null}
+          {!user && me.isError && !(me.error instanceof ApiError && me.error.status === 401) ? (
+            <div className="space-y-3">
+              <Alert tone="error">{me.error.message}</Alert>
+              <Button variant="secondary" onClick={() => void me.refetch()} disabled={me.isFetching}>
+                Try again
+              </Button>
             </div>
           ) : null}
           {user && !user.email_verified ? (

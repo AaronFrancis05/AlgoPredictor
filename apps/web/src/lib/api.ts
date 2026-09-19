@@ -29,15 +29,47 @@ function readCookie(name: string): string | undefined {
     ?.split("=")[1];
 }
 
-let refreshing: Promise<boolean> | null = null;
+/** ok: new session cookies are set. signed_out: the server refused the session. unavailable: no answer (network,
+ * 5xx, 429), so the session may well still be good. */
+export type RefreshOutcome = "ok" | "signed_out" | "unavailable";
 
-async function refreshSession(): Promise<boolean> {
-  refreshing ??= fetch("/api/v1/auth/refresh", { method: "POST", credentials: "same-origin" })
-    .then((r) => r.ok)
-    .finally(() => {
-      setTimeout(() => (refreshing = null), 0);
-    });
+async function attemptRefresh(): Promise<RefreshOutcome> {
+  try {
+    const r = await fetch("/api/v1/auth/refresh", { method: "POST", credentials: "same-origin" });
+    if (r.ok) return "ok";
+    return r.status >= 500 || r.status === 429 ? "unavailable" : "signed_out";
+  } catch {
+    return "unavailable";
+  }
+}
+
+const REFRESH_RETRY_MS = 1_000;
+
+/** One refresh with a single retry when the server did not answer. The first request after a quiet spell is the
+ * one most likely to hit a cold connection, and giving up there would sign the visitor out for nothing. */
+export async function refreshWithRetry(
+  attempt: () => Promise<RefreshOutcome> = attemptRefresh,
+  wait: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
+): Promise<RefreshOutcome> {
+  const first = await attempt();
+  if (first !== "unavailable") return first;
+  await wait(REFRESH_RETRY_MS);
+  return attempt();
+}
+
+let refreshing: Promise<RefreshOutcome> | null = null;
+
+function refreshSession(): Promise<RefreshOutcome> {
+  refreshing ??= refreshWithRetry().finally(() => {
+    setTimeout(() => (refreshing = null), 0);
+  });
   return refreshing;
+}
+
+/** Drop the readable session marker once the server has refused the session (the API clears the httpOnly cookies
+ * itself). Without this the public pages keep offering "Dashboard" to someone who is signed out. */
+export function forgetSession(): void {
+  if (typeof document !== "undefined") document.cookie = "ap_csrf=; Max-Age=0; path=/; SameSite=Lax";
 }
 
 function messageFrom(detail: unknown, status: number): string {
@@ -87,7 +119,13 @@ export async function api<S extends z.ZodTypeAny>(
     body: init.json !== undefined ? JSON.stringify(init.json) : init.body,
   });
   if (res.status === 401 && !retried && !path.startsWith("/auth/")) {
-    if (await refreshSession()) return api(path, schema, init, true);
+    const outcome = await refreshSession();
+    if (outcome === "ok") return api(path, schema, init, true);
+    if (outcome === "unavailable") {
+      // not a sign-out: report it as a server problem so the page offers a retry instead of the sign-in form
+      throw new ApiError(503, null, "Could not reach the server. Check your connection and try again.");
+    }
+    forgetSession();
   }
   const body = res.status === 204 ? null : await res.json().catch(() => null);
   if (!res.ok) {

@@ -49,6 +49,22 @@ async def test_refresh_rotation_and_reuse_detection(client):
     assert (await client.post("/api/v1/auth/refresh")).status_code == 401
 
 
+async def test_failed_refresh_clears_the_session_cookies(client):
+    email = await register_verified(client)
+    await login(client, email)
+    old_refresh = client.cookies.get("ap_refresh", path="/api/v1/auth")
+    assert (await client.post("/api/v1/auth/refresh")).status_code == 200
+    client.cookies.set("ap_refresh", old_refresh, path="/api/v1/auth")
+    r = await client.post("/api/v1/auth/refresh")
+    assert r.status_code == 401 and r.json()["detail"] == "Session revoked"
+    cleared = {c.split("=", 1)[0] for c in r.headers.get_list("set-cookie") if "Max-Age=0" in c}
+    assert {"ap_access", "ap_refresh", "ap_csrf"} <= cleared
+    # no refresh cookie at all: still a 401 that clears whatever is left
+    client.cookies.clear()
+    r = await client.post("/api/v1/auth/refresh")
+    assert r.status_code == 401 and "ap_csrf" in r.headers.get("set-cookie", "")
+
+
 async def test_csrf_required_for_cookie_authenticated_writes(client):
     email = await register_verified(client)
     data = await login(client, email)
