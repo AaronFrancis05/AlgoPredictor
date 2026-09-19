@@ -219,6 +219,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     await api("/auth/logout", Message, { method: "POST" }).catch(() => null);
     qc.clear();
     router.replace("/");
+    router.refresh(); // drop cached signed-in page renders (staleTimes.dynamic)
   }
 
   const user = me.data;

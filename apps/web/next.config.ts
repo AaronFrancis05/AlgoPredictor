@@ -7,6 +7,9 @@ const nextConfig: NextConfig = {
   output: "standalone", // minimal server bundle for the Docker image
   poweredByHeader: false,
   reactStrictMode: true,
+  // Every page is dynamic (per-request CSP nonce), so by default the router refetches a page on each visit. Reusing
+  // the server render for 30 s makes tab switches instant; page data is still refreshed by TanStack Query.
+  experimental: { staleTimes: { dynamic: 30 } },
   // The browser calls the API on the same origin, so auth cookies stay first-party and SameSite=Lax works.
   async rewrites() {
     return [{ source: "/api/v1/:path*", destination: `${API_INTERNAL_URL}/api/v1/:path*` }];
